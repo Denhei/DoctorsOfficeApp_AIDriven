@@ -8,11 +8,14 @@ Esta POC demonstra um fluxo completo de **triagem, validação, agendamento, con
 
 ## Estrutura de pastas
 ```
-Consultorio/
-├─ backend/      # API ASP.NET Core
-├─ frontend/     # Aplicação Angular
-├─ .ai/          # Documentação de arquitetura, padrões, regras de negócio
-└─ README.md     # Este documento
+DoctorsOfficeApp_AIDriven/
+├─ backend/
+│  ├─ Consultorio.Api/        # API ASP.NET Core 8
+│  └─ Consultorio.Api.Tests/  # Testes de caracterização (xUnit + Testcontainers)
+├─ frontend/                  # Aplicação Angular 19
+├─ docs/refactoring/          # Diagnóstico, revisão e Relatório de Modernização
+├─ .ai/                       # Arquitetura (ADRs), padrões, regras de negócio, stack
+└─ README.md
 ```
 
 ## Como executar localmente
@@ -20,28 +23,39 @@ Consultorio/
 - .NET 6 SDK ou superior (`dotnet --version`).
 - Node 20+ e npm (`node -v`).
 - Angular CLI (`npm i -g @angular/cli`).
-- PostgreSQL e MongoDB em execução (padrão nas portas 5432 e 27017).
+- Docker (para `docker compose up -d` dos bancos e para os testes de integração).
+
+### Bancos
+```bash
+docker compose up -d
+```
+A senha do PostgreSQL em `appsettings.json` precisa ser a mesma do `docker-compose.yml`.
 
 ### Backend
-```powershell
+```bash
 cd backend/Consultorio.Api
-dotnet restore
-# Ajuste as strings de conexão em appsettings.Development.json se necessário
 dotnet run --urls "http://localhost:5000"
 ```
-A API ficará disponível em `http://localhost:5000`.  Teste rápido:
-```powershell
-curl http://localhost:5000/health
+Na subida a API aplica as migrations e o seed (contas em `Data/DbInitializer.cs`, senha `Senha@123`). Teste rápido:
+```bash
+curl http://localhost:5000/api/health
 ```
-Deve retornar o status dos bancos.
+Swagger em `http://localhost:5000/swagger`.
+
+### Testes
+```bash
+cd backend
+dotnet test Consultorio.Api.Tests
+```
+Sobem PostgreSQL e MongoDB em containers, rodam a API real e verificam o contrato HTTP de todos os endpoints (ver `docs/refactoring`).
 
 ### Frontend
-```powershell
-cd ../../frontend
+```bash
+cd frontend
 npm ci
-ng serve --proxy-config proxy.conf.json --open
+npx ng serve --open
 ```
-O Angular abrirá o navegador em `http://localhost:4200` e utilizará o proxy para chamar a API.
+O Angular abre `http://localhost:4200` e chama a API em `http://localhost:5000/api` (`src/app/services/api-url.ts`).
 
 ## Tecnologias (sumário) 
 - **Frontend**: Angular 16, TypeScript, RxJS, Angular Material (opcional).
@@ -56,7 +70,7 @@ O Angular abrirá o navegador em `http://localhost:4200` e utilizará o proxy pa
 - **Decisões de arquitetura (ADRs)** – `.ai/architecture.md`
 - **Stack de tecnologias** – `.ai/tech-stack.md`
 - **Regras de negócio** – `.ai/business-rules.md`
-- **Plano de implementação da POC** – `plano_implementacao_poc.md`
+- **Refatoração (diagnóstico, revisão e relatório)** – `docs/refactoring/`
 
 ## Contribuição
 1. Fork o repositório.

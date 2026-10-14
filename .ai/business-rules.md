@@ -6,12 +6,12 @@
 - O resumo final da triagem (`ResumoCorrigido`) só pode ser aprovado por um **Enfermeiro** antes de avançar para agendamento.
 
 ## 2. Validação Enfermeiro
-- Somente usuários com a role **Enfermeiro** podem acessar a rota `/api/enfermeiro/validar`.
+- Somente usuários com a role **Enfermeiro** podem validar uma coleta (`PUT /api/coletas/{id}/validacao`); a fila (`GET /api/coletas`) é filtrada pela instituição do enfermeiro.
 - A validação pode **aprovar** ou **rejeitar** a coleta; em caso de rejeição, o paciente deve retomar a triagem.
 
 ## 3. Agendamento de Consulta
-- Slots (`SlotAgenda`) são pré‑gerados e marcados como `Disponivel = true`.
-- Ao reservar um slot, ele deve ser marcado como `Disponivel = false` dentro de uma transação para evitar dupla reserva.
+- Slots (`SlotAgenda`) são pré‑gerados pelo seed; um slot está disponível quando não tem consulta ativa (não cancelada), o que também é garantido por um índice único parcial em `Consulta.SlotId`.
+- A reserva roda em uma transação com `FOR UPDATE` na linha do paciente; slot já reservado ou paciente com consulta no mesmo intervalo respondem HTTP 409.
 - Só pacientes que tenham **triagem aprovada** podem reservar.
 
 ## 4. Evolução Clínica
