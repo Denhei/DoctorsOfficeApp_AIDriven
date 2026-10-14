@@ -159,7 +159,7 @@ public class AgendaService : IAgendaService
 
         if (slotOcupado)
         {
-            throw new InvalidOperationException("Este horário já foi reservado por outro paciente (Conflito de Slot).");
+            throw new ConflitoException("Este horário já foi reservado por outro paciente (Conflito de Slot).");
         }
 
         // 5. Verificar se o paciente já possui outra consulta ativa no mesmo horário (sobreposição)
@@ -172,7 +172,7 @@ public class AgendaService : IAgendaService
 
         if (pacienteConflito)
         {
-            throw new InvalidOperationException("O paciente já possui uma consulta agendada neste mesmo intervalo de horário.");
+            throw new ConflitoException("O paciente já possui uma consulta agendada neste mesmo intervalo de horário.");
         }
 
         var consulta = new Consulta

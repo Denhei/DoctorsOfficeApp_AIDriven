@@ -7,15 +7,8 @@ namespace Consultorio.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ConsultorioControllerBase
+public class AuthController(IAuthService authService) : ConsultorioControllerBase
 {
-    private readonly IAuthService _authService;
-
-    public AuthController(IAuthService authService)
-    {
-        _authService = authService;
-    }
-
     /// <summary>
     /// Realiza login no sistema com contas fictícias pré-carregadas.
     /// </summary>
@@ -25,7 +18,7 @@ public class AuthController : ConsultorioControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
-        var response = await _authService.LoginAsync(dto);
+        var response = await authService.LoginAsync(dto);
         if (response == null)
         {
             return Unauthorized(new { mensagem = "Credenciais inválidas ou usuário não encontrado." });
@@ -49,7 +42,7 @@ public class AuthController : ConsultorioControllerBase
             return Unauthorized();
         }
 
-        var userInfo = await _authService.ObterUsuarioAtualAsync(userId);
+        var userInfo = await authService.ObterUsuarioAtualAsync(userId);
         if (userInfo == null)
         {
             return NotFound(new { mensagem = "Usuário não encontrado." });

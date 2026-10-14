@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using Consultorio.Api.Data;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -62,6 +63,8 @@ builder.Services.AddAuthentication(options =>
 });
 
 // 4. Injeção de Dependências
+builder.Services.AddExceptionHandler<TratadorGlobalDeExcecoes>();
+builder.Services.AddProblemDetails(); // fallback (500 em application/problem+json) para exceções não mapeadas
 builder.Services.AddSingleton<MongoDbContext>();
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -153,6 +156,8 @@ using (var scope = app.Services.CreateScope())
 }
 
 // 9. Pipeline HTTP
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
