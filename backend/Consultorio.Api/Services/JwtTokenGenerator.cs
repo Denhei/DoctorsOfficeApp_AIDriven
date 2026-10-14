@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Consultorio.Api.Dominio;
 using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Entities;
 using Microsoft.Extensions.Options;
@@ -24,15 +25,8 @@ public class JwtTokenGenerator(IOptions<JwtOptions> opcoes) : IJwtTokenGenerator
             new(JwtRegisteredClaimNames.Sub, usuario.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, usuario.Email ?? string.Empty),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
-            new(ClaimTypes.Name, usuario.NomeCompleto),
-            new(ClaimTypes.Role, usuario.Perfil.ToString()),
-            new("perfil", usuario.Perfil.ToString())
         };
-
-        if (usuario.InstituicaoId is { } instituicaoId) claims.Add(new Claim("instituicaoId", instituicaoId.ToString()));
-        if (pacienteId is { } pac) claims.Add(new Claim("pacienteId", pac.ToString()));
-        if (medicoId is { } med) claims.Add(new Claim("medicoId", med.ToString()));
+        claims.AddRange(UsuarioAtual.ParaClaims(usuario, pacienteId, medicoId));
 
         var expiraEm = DateTime.UtcNow.AddHours(jwt.ExpirationHours);
 

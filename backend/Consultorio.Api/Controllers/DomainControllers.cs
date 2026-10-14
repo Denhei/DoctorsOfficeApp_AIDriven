@@ -42,11 +42,11 @@ public class MedicosController(IInstituicaoService service) : ConsultorioControl
 public class PacientesController(IPacienteService pacienteService, IProntuarioService prontuarioService) : ConsultorioControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "Atendente,Admin,Medico,Enfermeiro")]
+    [Authorize(Roles = Papeis.Equipe)]
     public async Task<IActionResult> Listar() => Ok(await pacienteService.ListarPacientesAsync());
 
     [HttpPost]
-    [Authorize(Roles = "Atendente,Admin")]
+    [Authorize(Roles = Papeis.Recepcao)]
     public async Task<IActionResult> Criar([FromBody] CriarPacienteDto dto) 
         => Ok(await pacienteService.CriarPacienteAsync(dto));
 
@@ -74,12 +74,12 @@ public class PacientesController(IPacienteService pacienteService, IProntuarioSe
         => Ok(await prontuarioService.ListarDocumentosAsync(id, Solicitante));
 
     [HttpGet("{id}/autorizacoes")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> ListarAutorizacoes(Guid id)
         => Ok(await prontuarioService.ListarAutorizacoesAsync(id, Solicitante));
 
     [HttpPost("{id}/autorizacoes")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> ConcederAutorizacao(Guid id, [FromBody] CriarAutorizacaoDto dto)
         => Ok(await prontuarioService.ConcederAutorizacaoAsync(id, dto, Solicitante));
 }
@@ -91,7 +91,7 @@ public class PacientesController(IPacienteService pacienteService, IProntuarioSe
 public class ColetasController(ITriagemChatService chatService) : ConsultorioControllerBase
 {
     [HttpPost]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> Iniciar([FromBody] IniciarColetaDto dto)
     {
         if (Solicitante.PacienteId is not { } pacienteId)
@@ -103,7 +103,7 @@ public class ColetasController(ITriagemChatService chatService) : ConsultorioCon
     }
 
     [HttpGet]
-    [Authorize(Roles = "Enfermeiro,Admin")]
+    [Authorize(Roles = Papeis.Triagem)]
     public async Task<IActionResult> ListarFila([FromQuery] string? status)
     {
         if (Solicitante.InstituicaoId is null && Solicitante.Perfil != PerfilUsuario.Admin)
@@ -122,17 +122,17 @@ public class ColetasController(ITriagemChatService chatService) : ConsultorioCon
     }
 
     [HttpPost("{id}/mensagens")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> EnviarMensagem(Guid id, [FromBody] EnviarMensagemChatDto dto)
         => Ok(await chatService.ProcessarMensagemAsync(id, Solicitante, dto));
 
     [HttpPost("{id}/finalizacao")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> Finalizar(Guid id)
         => Ok(await chatService.FinalizarEnvioEnfermeiroAsync(id, Solicitante));
 
     [HttpPut("{id}/validacao")]
-    [Authorize(Roles = "Enfermeiro")]
+    [Authorize(Roles = Papeis.Enfermeiro)]
     public async Task<IActionResult> Validar(Guid id, [FromBody] ValidarColetaDto dto)
     {
         var sucesso = await chatService.ValidarColetaAsync(id, Solicitante, dto);
@@ -156,7 +156,7 @@ public class SlotsController(IAgendaService agendaService) : ConsultorioControll
         => Ok(await agendaService.ListarSlotsAsync(medicoId, instituicaoId, data));
 
     [HttpPost]
-    [Authorize(Roles = "Atendente,Admin")]
+    [Authorize(Roles = Papeis.Recepcao)]
     public async Task<IActionResult> Criar([FromBody] CriarSlotDto dto)
         => Ok(await agendaService.CriarSlotAsync(dto, Solicitante.InstituicaoId ?? dto.InstituicaoId));
 }
@@ -193,17 +193,17 @@ public class ConsultasController(
     }
 
     [HttpPut("{id}/evolucao")]
-    [Authorize(Roles = "Medico")]
+    [Authorize(Roles = Papeis.Medico)]
     public async Task<IActionResult> RegistrarEvolucao(Guid id, [FromBody] RegistrarEvolucaoDto dto)
         => Ok(await prontuarioService.RegistrarEvolucaoAsync(id, Solicitante, dto));
 
     [HttpPost("{id}/conclusao")]
-    [Authorize(Roles = "Medico")]
+    [Authorize(Roles = Papeis.Medico)]
     public async Task<IActionResult> Concluir(Guid id)
         => Ok(await prontuarioService.ConcluirConsultaAsync(id, Solicitante));
 
     [HttpGet("{id}/pesquisa")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> ObterPesquisa(Guid id)
     {
         var res = await pesquisaService.ObterPesquisaConsultaAsync(id, Solicitante);
@@ -211,7 +211,7 @@ public class ConsultasController(
     }
 
     [HttpPut("{id}/pesquisa")]
-    [Authorize(Roles = "Paciente")]
+    [Authorize(Roles = Papeis.Paciente)]
     public async Task<IActionResult> ResponderPesquisa(Guid id, [FromBody] ResponderPesquisaDto dto)
         => Ok(await pesquisaService.ResponderPesquisaAsync(id, dto, Solicitante));
 }
@@ -235,7 +235,7 @@ public class DocumentosController(IProntuarioService prontuarioService) : Consul
 // 7. Autorizações de Compartilhamento
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Paciente")]
+[Authorize(Roles = Papeis.Paciente)]
 public class AutorizacoesController(IProntuarioService prontuarioService) : ConsultorioControllerBase
 {
     [HttpDelete("{id}")]
@@ -249,7 +249,7 @@ public class AutorizacoesController(IProntuarioService prontuarioService) : Cons
 // 8. Notificações Simuladas
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Paciente")]
+[Authorize(Roles = Papeis.Paciente)]
 public class NotificacoesController(INotificacaoPesquisaService service) : ConsultorioControllerBase
 {
     [HttpGet]
@@ -259,7 +259,7 @@ public class NotificacoesController(INotificacaoPesquisaService service) : Consu
 // 9. Dashboard Operacional
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Atendente,Admin")]
+[Authorize(Roles = Papeis.Recepcao)]
 public class DashboardController(IDashboardService service) : ConsultorioControllerBase
 {
     [HttpGet]
@@ -269,7 +269,7 @@ public class DashboardController(IDashboardService service) : ConsultorioControl
 // 10. Admin
 [ApiController]
 [Route("api/admin")]
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = Papeis.Admin)]
 public class AdminController(IAdminService service) : ConsultorioControllerBase
 {
     [HttpGet("usuarios")]
