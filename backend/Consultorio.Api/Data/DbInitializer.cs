@@ -7,16 +7,16 @@ using MongoDB.Driver;
 
 namespace Consultorio.Api.Data;
 
+/// <summary>Dados de demonstração: duas clínicas, equipe de cada uma, dois pacientes e o histórico do primeiro.</summary>
 public static class DbInitializer
 {
+    private const string SenhaPadrao = "Senha@123";
+
     public static async Task SeedAsync(AppDbContext context, UserManager<Usuario> userManager, RoleManager<Papel> roleManager, MongoDbContext mongoContext)
     {
-        // 1. Garantir que as migrations do PostgreSQL foram aplicadas
         await context.Database.MigrateAsync();
 
-        // 2. Criar Papéis do Identity
-        string[] roles = Enum.GetNames<PerfilUsuario>();
-        foreach (var role in roles)
+        foreach (var role in Enum.GetNames<PerfilUsuario>())
         {
             if (!await roleManager.RoleExistsAsync(role))
             {
@@ -24,65 +24,35 @@ public static class DbInitializer
             }
         }
 
-        // Se já existem instituições, assumimos que o seed já rodou
+        // Se já existem instituições, o seed já rodou.
         if (await context.Instituicoes.AnyAsync())
         {
             return;
         }
 
-        var senhaPadrao = "Senha@123";
+        var agora = DateTime.UtcNow;
 
-        // 3. Criar Instituições
         var instA = new Instituicao
         {
             Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             Nome = "Clínica Santa Maria",
             RazaoSocial = "Santa Maria Saúde e Diagnósticos Ltda",
-            Ativa = true,
-            CriadoEmUtc = DateTime.UtcNow
         };
-
         var instB = new Instituicao
         {
             Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
             Nome = "Clínica São Bento",
             RazaoSocial = "São Bento Medicina Integrada Ltda",
-            Ativa = true,
-            CriadoEmUtc = DateTime.UtcNow
         };
-
-        await context.Instituicoes.AddRangeAsync(instA, instB);
+        context.Instituicoes.AddRange(instA, instB);
         await context.SaveChangesAsync();
 
-        // 4. Criar Admin Técnico
-        var adminUser = new Usuario
-        {
-            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-            UserName = "admin@consultorio.local",
-            Email = "admin@consultorio.local",
-            NomeCompleto = "Administrador do Sistema",
-            Perfil = PerfilUsuario.Admin,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(adminUser, senhaPadrao);
-        await userManager.AddToRoleAsync(adminUser, PerfilUsuario.Admin.ToString());
+        await userManager.CriarUsuarioAsync("admin@consultorio.local", "Administrador do Sistema", SenhaPadrao, PerfilUsuario.Admin,
+            id: Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
 
-        // 5. Profissionais da Clínica Santa Maria
-        var medAUser = new Usuario
-        {
-            Id = Guid.Parse("bbbbbbbb-1111-1111-1111-111111111111"),
-            UserName = "medico.santamaria@consultorio.local",
-            Email = "medico.santamaria@consultorio.local",
-            NomeCompleto = "Dr. Carlos Roberto",
-            Perfil = PerfilUsuario.Medico,
-            InstituicaoId = instA.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(medAUser, senhaPadrao);
-        await userManager.AddToRoleAsync(medAUser, PerfilUsuario.Medico.ToString());
-
+        // Equipe da Clínica Santa Maria
+        var medAUser = await userManager.CriarUsuarioAsync("medico.santamaria@consultorio.local", "Dr. Carlos Roberto", SenhaPadrao, PerfilUsuario.Medico, instA.Id,
+            Guid.Parse("bbbbbbbb-1111-1111-1111-111111111111"));
         var medA = new Medico
         {
             Id = Guid.Parse("cccccccc-1111-1111-1111-111111111111"),
@@ -91,51 +61,14 @@ public static class DbInitializer
             Especialidade = "Cardiologia",
             CrmFicticio = "CRM/SP 123456"
         };
-        await context.Medicos.AddAsync(medA);
+        var enfAUser = await userManager.CriarUsuarioAsync("enfermeiro.santamaria@consultorio.local", "Enf. Juliana Lima", SenhaPadrao, PerfilUsuario.Enfermeiro, instA.Id,
+            Guid.Parse("dddddddd-1111-1111-1111-111111111111"));
+        await userManager.CriarUsuarioAsync("atendente.santamaria@consultorio.local", "Atd. Beatriz Alves", SenhaPadrao, PerfilUsuario.Atendente, instA.Id,
+            Guid.Parse("eeeeeeee-1111-1111-1111-111111111111"));
 
-        var enfAUser = new Usuario
-        {
-            Id = Guid.Parse("dddddddd-1111-1111-1111-111111111111"),
-            UserName = "enfermeiro.santamaria@consultorio.local",
-            Email = "enfermeiro.santamaria@consultorio.local",
-            NomeCompleto = "Enf. Juliana Lima",
-            Perfil = PerfilUsuario.Enfermeiro,
-            InstituicaoId = instA.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(enfAUser, senhaPadrao);
-        await userManager.AddToRoleAsync(enfAUser, PerfilUsuario.Enfermeiro.ToString());
-
-        var atdAUser = new Usuario
-        {
-            Id = Guid.Parse("eeeeeeee-1111-1111-1111-111111111111"),
-            UserName = "atendente.santamaria@consultorio.local",
-            Email = "atendente.santamaria@consultorio.local",
-            NomeCompleto = "Atd. Beatriz Alves",
-            Perfil = PerfilUsuario.Atendente,
-            InstituicaoId = instA.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(atdAUser, senhaPadrao);
-        await userManager.AddToRoleAsync(atdAUser, PerfilUsuario.Atendente.ToString());
-
-        // 6. Profissionais da Clínica São Bento
-        var medBUser = new Usuario
-        {
-            Id = Guid.Parse("bbbbbbbb-2222-2222-2222-222222222222"),
-            UserName = "medico.saobento@consultorio.local",
-            Email = "medico.saobento@consultorio.local",
-            NomeCompleto = "Dra. Ana Paula",
-            Perfil = PerfilUsuario.Medico,
-            InstituicaoId = instB.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(medBUser, senhaPadrao);
-        await userManager.AddToRoleAsync(medBUser, PerfilUsuario.Medico.ToString());
-
+        // Equipe da Clínica São Bento
+        var medBUser = await userManager.CriarUsuarioAsync("medico.saobento@consultorio.local", "Dra. Ana Paula", SenhaPadrao, PerfilUsuario.Medico, instB.Id,
+            Guid.Parse("bbbbbbbb-2222-2222-2222-222222222222"));
         var medB = new Medico
         {
             Id = Guid.Parse("cccccccc-2222-2222-2222-222222222222"),
@@ -144,50 +77,16 @@ public static class DbInitializer
             Especialidade = "Ortopedia",
             CrmFicticio = "CRM/SP 654321"
         };
-        await context.Medicos.AddAsync(medB);
+        await userManager.CriarUsuarioAsync("enfermeiro.saobento@consultorio.local", "Enf. Marcos Dias", SenhaPadrao, PerfilUsuario.Enfermeiro, instB.Id,
+            Guid.Parse("dddddddd-2222-2222-2222-222222222222"));
+        await userManager.CriarUsuarioAsync("atendente.saobento@consultorio.local", "Atd. Lucas Ferreira", SenhaPadrao, PerfilUsuario.Atendente, instB.Id,
+            Guid.Parse("eeeeeeee-2222-2222-2222-222222222222"));
 
-        var enfBUser = new Usuario
-        {
-            Id = Guid.Parse("dddddddd-2222-2222-2222-222222222222"),
-            UserName = "enfermeiro.saobento@consultorio.local",
-            Email = "enfermeiro.saobento@consultorio.local",
-            NomeCompleto = "Enf. Marcos Dias",
-            Perfil = PerfilUsuario.Enfermeiro,
-            InstituicaoId = instB.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(enfBUser, senhaPadrao);
-        await userManager.AddToRoleAsync(enfBUser, PerfilUsuario.Enfermeiro.ToString());
+        context.Medicos.AddRange(medA, medB);
 
-        var atdBUser = new Usuario
-        {
-            Id = Guid.Parse("eeeeeeee-2222-2222-2222-222222222222"),
-            UserName = "atendente.saobento@consultorio.local",
-            Email = "atendente.saobento@consultorio.local",
-            NomeCompleto = "Atd. Lucas Ferreira",
-            Perfil = PerfilUsuario.Atendente,
-            InstituicaoId = instB.Id,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(atdBUser, senhaPadrao);
-        await userManager.AddToRoleAsync(atdBUser, PerfilUsuario.Atendente.ToString());
-
-        // 7. Paciente 1 (Carlos Silva - Cenário com Histórico Completo)
-        var pacCarlosUser = new Usuario
-        {
-            Id = Guid.Parse("ffffffff-1111-1111-1111-111111111111"),
-            UserName = "paciente.carlos@consultorio.local",
-            Email = "paciente.carlos@consultorio.local",
-            NomeCompleto = "Carlos Silva",
-            Perfil = PerfilUsuario.Paciente,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(pacCarlosUser, senhaPadrao);
-        await userManager.AddToRoleAsync(pacCarlosUser, PerfilUsuario.Paciente.ToString());
-
+        // Pacientes: Carlos tem histórico completo; Mariana é o cenário novo para demonstração ao vivo
+        var pacCarlosUser = await userManager.CriarUsuarioAsync("paciente.carlos@consultorio.local", "Carlos Silva", SenhaPadrao, PerfilUsuario.Paciente,
+            id: Guid.Parse("ffffffff-1111-1111-1111-111111111111"));
         var pacCarlos = new Paciente
         {
             Id = Guid.Parse("10101010-1111-1111-1111-111111111111"),
@@ -196,24 +95,11 @@ public static class DbInitializer
             DataNascimento = new DateTime(1985, 5, 20, 0, 0, 0, DateTimeKind.Utc),
             TelefoneFicticio = "(11) 98888-1111",
             EmailFicticio = "carlos.silva@exemplo.local",
-            CriadoEmUtc = DateTime.UtcNow.AddDays(-10)
+            CriadoEmUtc = agora.AddDays(-10)
         };
-        await context.Pacientes.AddAsync(pacCarlos);
 
-        // 8. Paciente 2 (Mariana Souza - Cenário Novo para Demonstração ao Vivo)
-        var pacMarianaUser = new Usuario
-        {
-            Id = Guid.Parse("ffffffff-2222-2222-2222-222222222222"),
-            UserName = "paciente.mariana@consultorio.local",
-            Email = "paciente.mariana@consultorio.local",
-            NomeCompleto = "Mariana Souza",
-            Perfil = PerfilUsuario.Paciente,
-            EmailConfirmed = true,
-            CriadoEmUtc = DateTime.UtcNow
-        };
-        await userManager.CreateAsync(pacMarianaUser, senhaPadrao);
-        await userManager.AddToRoleAsync(pacMarianaUser, PerfilUsuario.Paciente.ToString());
-
+        var pacMarianaUser = await userManager.CriarUsuarioAsync("paciente.mariana@consultorio.local", "Mariana Souza", SenhaPadrao, PerfilUsuario.Paciente,
+            id: Guid.Parse("ffffffff-2222-2222-2222-222222222222"));
         var pacMariana = new Paciente
         {
             Id = Guid.Parse("10101010-2222-2222-2222-222222222222"),
@@ -222,31 +108,29 @@ public static class DbInitializer
             DataNascimento = new DateTime(1992, 8, 14, 0, 0, 0, DateTimeKind.Utc),
             TelefoneFicticio = "(11) 97777-2222",
             EmailFicticio = "mariana.souza@exemplo.local",
-            CriadoEmUtc = DateTime.UtcNow.AddDays(-2)
+            CriadoEmUtc = agora.AddDays(-2)
         };
-        await context.Pacientes.AddAsync(pacMariana);
+
+        context.Pacientes.AddRange(pacCarlos, pacMariana);
         await context.SaveChangesAsync();
 
-        // 9. Histórico Prévio do Paciente 1 (Carlos Silva)
-        var conversaCarlosId = Guid.Parse("33333333-1111-1111-1111-111111111111");
+        // Histórico prévio do Carlos: triagem validada, consulta concluída, evolução, exame, autorização e pesquisa
         var coletaCarlos = new ColetaInicial
         {
             Id = Guid.Parse("44444444-1111-1111-1111-111111111111"),
             PacienteId = pacCarlos.Id,
             InstituicaoId = instA.Id,
             Status = StatusColeta.Validada,
-            ConversaId = conversaCarlosId,
+            ConversaId = Guid.Parse("33333333-1111-1111-1111-111111111111"),
             ResumoValidado = "Queixa relatada: Dor no peito leve e cansaço. Duração relatada: 5 dias. Alergias relatadas: Nenhuma conhecida. Medicamentos relatados: Losartana 50mg. Observações: Piora aos esforços moderados.",
             EnfermeiroId = enfAUser.Id,
-            ValidadoEmUtc = DateTime.UtcNow.AddDays(-5),
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-5)
+            ValidadoEmUtc = agora.AddDays(-5),
+            CriadaEmUtc = agora.AddDays(-5)
         };
-        await context.ColetasIniciais.AddAsync(coletaCarlos);
 
-        // Inserir conversa do Carlos no MongoDB
-        var conversaCarlosMongo = new ConversaMongo
+        var conversaCarlos = new ConversaMongo
         {
-            Id = conversaCarlosId.ToString(),
+            Id = coletaCarlos.ConversaId.ToString(),
             ColetaId = coletaCarlos.Id.ToString(),
             PacienteId = pacCarlos.Id.ToString(),
             InstituicaoId = instA.Id.ToString(),
@@ -259,33 +143,28 @@ public static class DbInitializer
                 Medicamentos = "Losartana 50mg",
                 Observacoes = "Piora aos esforços"
             },
-            Mensagens = new List<MensagemMongo>
-            {
-                new() { Remetente = "Bot", Conteudo = "Olá, Carlos Silva! Vamos iniciar a coleta guiada. Confirma seus dados?", Tipo = "Texto" },
-                new() { Remetente = "Paciente", Conteudo = "Sim, confirmo.", Tipo = "Texto" },
-                new() { Remetente = "Bot", Conteudo = "Qual é a sua queixa principal?", Tipo = "Texto" },
-                new() { Remetente = "Paciente", Conteudo = "Dor no peito leve e cansaço", Tipo = "Texto" },
-                new() { Remetente = "Bot", Conteudo = "Há quanto tempo você sente isso?", Tipo = "Texto" },
-                new() { Remetente = "Paciente", Conteudo = "5 dias", Tipo = "Texto" }
-            },
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-5),
-            AtualizadaEmUtc = DateTime.UtcNow.AddDays(-5)
+            Mensagens =
+            [
+                MensagemMongo.Bot("Olá, Carlos Silva! Vamos iniciar a coleta guiada. Confirma seus dados?"),
+                MensagemMongo.DoPaciente("Sim, confirmo."),
+                MensagemMongo.Bot("Qual é a sua queixa principal?"),
+                MensagemMongo.DoPaciente("Dor no peito leve e cansaço"),
+                MensagemMongo.Bot("Há quanto tempo você sente isso?"),
+                MensagemMongo.DoPaciente("5 dias"),
+            ],
+            CriadaEmUtc = agora.AddDays(-5),
+            AtualizadaEmUtc = agora.AddDays(-5)
         };
-        await mongoContext.Conversas.ReplaceOneAsync(
-            c => c.Id == conversaCarlosMongo.Id,
-            conversaCarlosMongo,
-            new ReplaceOptions { IsUpsert = true }
-        );
+        await mongoContext.Conversas.ReplaceOneAsync(c => c.Id == conversaCarlos.Id, conversaCarlos, new ReplaceOptions { IsUpsert = true });
 
         var slotPassado = new SlotAgenda
         {
             Id = Guid.Parse("55555555-1111-1111-1111-111111111111"),
             MedicoId = medA.Id,
             InstituicaoId = instA.Id,
-            InicioUtc = DateTime.UtcNow.AddDays(-4).Date.AddHours(9),
-            FimUtc = DateTime.UtcNow.AddDays(-4).Date.AddHours(9).AddMinutes(30)
+            InicioUtc = agora.AddDays(-4).Date.AddHours(9),
+            FimUtc = agora.AddDays(-4).Date.AddHours(9).AddMinutes(30)
         };
-        await context.SlotsAgenda.AddAsync(slotPassado);
 
         var consultaCarlos = new Consulta
         {
@@ -294,140 +173,93 @@ public static class DbInitializer
             SlotId = slotPassado.Id,
             ColetaId = coletaCarlos.Id,
             Status = StatusConsulta.Concluida,
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-5)
+            CriadaEmUtc = agora.AddDays(-5)
         };
-        await context.Consultas.AddAsync(consultaCarlos);
 
-        var evolucaoCarlos = new Evolucao
-        {
-            Id = Guid.Parse("77777777-1111-1111-1111-111111111111"),
-            ConsultaId = consultaCarlos.Id,
-            MedicoId = medA.Id,
-            Texto = "Paciente compareceu com queixa de desconforto torácico. Ausculta cardíaca em ritmo sinusal regular, sem sopros. Solicitado ECG e hemograma completo. Mantida dosagem de Losartana.",
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-4).Date.AddHours(9).AddMinutes(25)
-        };
-        await context.Evolucoes.AddAsync(evolucaoCarlos);
-
-        var docCarlos = new DocumentoPaciente
-        {
-            Id = Guid.Parse("88888888-1111-1111-1111-111111111111"),
-            PacienteId = pacCarlos.Id,
-            InstituicaoOrigemId = instA.Id,
-            NomeOriginal = "Exame_Eletrocardiograma_Ficticio.pdf",
-            Tipo = "application/pdf",
-            Extensao = ".pdf",
-            TamanhoBytes = 1024 * 15,
-            ChaveArquivo = "seed_ecg_carlos.pdf",
-            CriadoEmUtc = DateTime.UtcNow.AddDays(-4)
-        };
-        await context.DocumentosPaciente.AddAsync(docCarlos);
-
-        var autorizacaoCarlos = new AutorizacaoCompartilhamento
-        {
-            Id = Guid.Parse("99999999-1111-1111-1111-111111111111"),
-            PacienteId = pacCarlos.Id,
-            InstituicaoOrigemId = instA.Id,
-            InstituicaoDestinoId = instB.Id,
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-3),
-            RevogadaEmUtc = null // Ativa
-        };
-        await context.AutorizacoesCompartilhamento.AddAsync(autorizacaoCarlos);
-
-        var pesquisaCarlos = new PesquisaSatisfacao
-        {
-            Id = Guid.Parse("baaaaaaa-1111-1111-1111-111111111111"),
-            ConsultaId = consultaCarlos.Id,
-            PacienteId = pacCarlos.Id,
-            Nota = 5,
-            Percepcao = PercepcaoAtendimento.Melhor,
-            Comentario = "Excelente atendimento e triagem rápida.",
-            RespondidaEmUtc = DateTime.UtcNow.AddDays(-4).AddHours(2)
-        };
-        await context.PesquisasSatisfacao.AddAsync(pesquisaCarlos);
-
-        var notif1 = new NotificacaoSimulada
-        {
-            Id = Guid.NewGuid(),
-            PacienteId = pacCarlos.Id,
-            ConsultaId = consultaCarlos.Id,
-            Canal = CanalNotificacao.WhatsApp,
-            Finalidade = FinalidadeNotificacao.ConvitePesquisa,
-            Titulo = "Pesquisa de Satisfação - Clínica Santa Maria",
-            Texto = "Olá Carlos, sua consulta foi concluída. Por favor, avalie nosso atendimento acessando a pesquisa.",
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-4).AddMinutes(35),
-            LidaEmUtc = DateTime.UtcNow.AddDays(-4).AddHours(2)
-        };
-        var notif2 = new NotificacaoSimulada
-        {
-            Id = Guid.NewGuid(),
-            PacienteId = pacCarlos.Id,
-            ConsultaId = consultaCarlos.Id,
-            Canal = CanalNotificacao.Email,
-            Finalidade = FinalidadeNotificacao.ConvitePesquisa,
-            Titulo = "Avalie sua experiência de atendimento",
-            Texto = "Prezado Carlos Silva, agradecemos sua visita. Clique aqui para responder ao nosso questionário de qualidade.",
-            CriadaEmUtc = DateTime.UtcNow.AddDays(-4).AddMinutes(35),
-            LidaEmUtc = DateTime.UtcNow.AddDays(-4).AddHours(2)
-        };
-        await context.NotificacoesSimuladas.AddRangeAsync(notif1, notif2);
-
-        // 10. Gerar Slots Futuros (próximos 7 dias úteis) para ambos os médicos
-        var agora = DateTime.UtcNow.Date;
-        var slotsFuturos = new List<SlotAgenda>();
-
-        for (int dia = 1; dia <= 7; dia++)
-        {
-            var dataSlot = agora.AddDays(dia);
-            if (dataSlot.DayOfWeek == DayOfWeek.Saturday || dataSlot.DayOfWeek == DayOfWeek.Sunday)
-                continue;
-
-            // Slots Dr. Carlos (Santa Maria) - 08:00 às 11:00
-            int[] horas = { 8, 9, 10, 14, 15, 16 };
-            foreach (var hora in horas)
+        context.AddRange(
+            coletaCarlos,
+            slotPassado,
+            consultaCarlos,
+            new Evolucao
             {
-                slotsFuturos.Add(new SlotAgenda
-                {
-                    Id = Guid.NewGuid(),
-                    MedicoId = medA.Id,
-                    InstituicaoId = instA.Id,
-                    InicioUtc = dataSlot.AddHours(hora),
-                    FimUtc = dataSlot.AddHours(hora).AddMinutes(30)
-                });
-
-                slotsFuturos.Add(new SlotAgenda
-                {
-                    Id = Guid.NewGuid(),
-                    MedicoId = medA.Id,
-                    InstituicaoId = instA.Id,
-                    InicioUtc = dataSlot.AddHours(hora).AddMinutes(30),
-                    FimUtc = dataSlot.AddHours(hora + 1)
-                });
-            }
-
-            // Slots Dra. Ana Paula (São Bento) - 09:00 às 17:00
-            foreach (var hora in horas)
+                Id = Guid.Parse("77777777-1111-1111-1111-111111111111"),
+                ConsultaId = consultaCarlos.Id,
+                MedicoId = medA.Id,
+                Texto = "Paciente compareceu com queixa de desconforto torácico. Ausculta cardíaca em ritmo sinusal regular, sem sopros. Solicitado ECG e hemograma completo. Mantida dosagem de Losartana.",
+                CriadaEmUtc = slotPassado.InicioUtc.AddMinutes(25)
+            },
+            new DocumentoPaciente
             {
-                slotsFuturos.Add(new SlotAgenda
-                {
-                    Id = Guid.NewGuid(),
-                    MedicoId = medB.Id,
-                    InstituicaoId = instB.Id,
-                    InicioUtc = dataSlot.AddHours(hora),
-                    FimUtc = dataSlot.AddHours(hora).AddMinutes(30)
-                });
+                Id = Guid.Parse("88888888-1111-1111-1111-111111111111"),
+                PacienteId = pacCarlos.Id,
+                InstituicaoOrigemId = instA.Id,
+                NomeOriginal = "Exame_Eletrocardiograma_Ficticio.pdf",
+                Tipo = "application/pdf",
+                Extensao = ".pdf",
+                TamanhoBytes = 1024 * 15,
+                ChaveArquivo = "seed_ecg_carlos.pdf",
+                CriadoEmUtc = agora.AddDays(-4)
+            },
+            new AutorizacaoCompartilhamento
+            {
+                Id = Guid.Parse("99999999-1111-1111-1111-111111111111"),
+                PacienteId = pacCarlos.Id,
+                InstituicaoOrigemId = instA.Id,
+                InstituicaoDestinoId = instB.Id,
+                CriadaEmUtc = agora.AddDays(-3),
+            },
+            new PesquisaSatisfacao
+            {
+                Id = Guid.Parse("baaaaaaa-1111-1111-1111-111111111111"),
+                ConsultaId = consultaCarlos.Id,
+                PacienteId = pacCarlos.Id,
+                Nota = 5,
+                Percepcao = PercepcaoAtendimento.Melhor,
+                Comentario = "Excelente atendimento e triagem rápida.",
+                RespondidaEmUtc = agora.AddDays(-4).AddHours(2)
+            },
+            new NotificacaoSimulada
+            {
+                PacienteId = pacCarlos.Id,
+                ConsultaId = consultaCarlos.Id,
+                Canal = CanalNotificacao.WhatsApp,
+                Finalidade = FinalidadeNotificacao.ConvitePesquisa,
+                Titulo = "Pesquisa de Satisfação - Clínica Santa Maria",
+                Texto = "Olá Carlos, sua consulta foi concluída. Por favor, avalie nosso atendimento acessando a pesquisa.",
+                CriadaEmUtc = agora.AddDays(-4).AddMinutes(35),
+                LidaEmUtc = agora.AddDays(-4).AddHours(2)
+            },
+            new NotificacaoSimulada
+            {
+                PacienteId = pacCarlos.Id,
+                ConsultaId = consultaCarlos.Id,
+                Canal = CanalNotificacao.Email,
+                Finalidade = FinalidadeNotificacao.ConvitePesquisa,
+                Titulo = "Avalie sua experiência de atendimento",
+                Texto = "Prezado Carlos Silva, agradecemos sua visita. Clique aqui para responder ao nosso questionário de qualidade.",
+                CriadaEmUtc = agora.AddDays(-4).AddMinutes(35),
+                LidaEmUtc = agora.AddDays(-4).AddHours(2)
+            });
 
-                slotsFuturos.Add(new SlotAgenda
-                {
-                    Id = Guid.NewGuid(),
-                    MedicoId = medB.Id,
-                    InstituicaoId = instB.Id,
-                    InicioUtc = dataSlot.AddHours(hora).AddMinutes(30),
-                    FimUtc = dataSlot.AddHours(hora + 1)
-                });
-            }
-        }
+        // Agenda futura: os 5 dias úteis dos próximos 7 dias, 6 horas cheias com dois slots de 30 min, para cada médico
+        int[] horas = [8, 9, 10, 14, 15, 16];
+        var slotsFuturos =
+            from dia in Enumerable.Range(1, 7)
+            let data = agora.Date.AddDays(dia)
+            where data.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)
+            from medico in new[] { medA, medB }
+            from hora in horas
+            from minuto in new[] { 0, 30 }
+            let inicio = data.AddHours(hora).AddMinutes(minuto)
+            select new SlotAgenda
+            {
+                MedicoId = medico.Id,
+                InstituicaoId = medico.InstituicaoId,
+                InicioUtc = inicio,
+                FimUtc = inicio.AddMinutes(30)
+            };
 
-        await context.SlotsAgenda.AddRangeAsync(slotsFuturos);
+        context.SlotsAgenda.AddRange(slotsFuturos);
         await context.SaveChangesAsync();
     }
 }
