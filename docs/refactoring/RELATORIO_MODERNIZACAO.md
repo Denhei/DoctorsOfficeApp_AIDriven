@@ -8,27 +8,38 @@ A estrutura segue as três fases pedidas: blindagem (testes de caracterização 
 
 ## Sumário executivo
 
-| Medida | Antes (`main`, 8ff4b1d) | Depois (`refactoring`) |
-| --- | ---: | ---: |
-| Linhas de código do backend (sem Migrations) | 4 270 | 3 405 (−20 %) |
-| Arquivos C# | 18 | 43 (um tipo por arquivo) |
-| Maior arquivo | `DomainControllers.cs`, 596 | `ProntuarioService.cs`, 344 |
-| `Services/TriagemChatService.cs` | 493 | 206 (+85 em `RoteiroTriagem.cs`, puro) |
-| `Data/DbInitializer.cs` | 434 | 265 |
-| Blocos `try/catch` em controllers | 27 | 0 (3 restantes: health check e seed) |
-| Construções manuais de DTO fora de `Mapeamentos.cs` | 24 | 3 (compostos: AuthResponse, Dashboard, Histórico) |
-| `.Include(` em serviços | 58 | 27 |
-| Literais `new MensagemMongo { ... }` | 14 | 0 |
-| Consultas ao banco só para descobrir quem é o solicitante | 17 | 0 |
-| Leituras de `IConfiguration` com `??` em cascata | 14 linhas em 4 arquivos | 2 linhas em 1 arquivo |
-| Exceções da BCL usadas como sinal de regra de negócio | 63 | 0 (tipos de domínio) |
-| `[Authorize(Roles = "...")]` com string solta | 18 | 0 |
-| DTOs de entrada mutáveis (`class` com `set`) | 12 | 0 (records com `init`) |
-| Métodos com mais de 60 linhas | 7 | 2 (um é o seed, só dados) |
-| Pacotes NuGet | 9 | 7 |
-| Artefatos de build versionados | 141 arquivos (37 MB) | 0 |
-| Testes automatizados | 0 | 59 (45 de integração HTTP + 14 unitários) |
-| Usos de `any` no frontend | 11 | 0 |
+| Medida | Antes (`main`, 8ff4b1d) | Depois (`refactoring`) | Variação |
+| --- | ---: | ---: | ---: |
+| Linhas de código do backend (sem Migrations) | 4 267 | 3 405 | −20 % |
+| Controllers (linhas) | 719 | 459 | −36 % |
+| Services (linhas) | 2 069 | 1 249 | −40 % |
+| Data: contexto, seed e consultas (linhas) | 594 | 480 | −19 % |
+| DTOs (linhas; agora incluem o mapeador `Mapeamentos.cs`) | 274 | 425 | +55 % |
+| `Dominio/` + `Infraestrutura/` (novos: exceções, `UsuarioAtual`, papéis, opções, filtro, armazenamento) | 0 | 163 | novo |
+| Maior arquivo C# | 596 (`DomainControllers.cs`) | 344 (`ProntuarioService.cs`) | −42 % |
+| Maior método | 421 (`SeedAsync`) | 249 (`SeedAsync`, só dados) | −41 % |
+| Métodos com mais de 60 linhas | 7 | 2 | −71 % |
+| `TriagemChatService` (+ `RoteiroTriagem`) | 493 | 291 | −41 % |
+| `DbInitializer.cs` | 434 | 265 | −39 % |
+| `catch` em controllers (os 2 restantes são as sondas do health check) | 29 | 2 | −93 % |
+| DTOs montados à mão fora do mapeador | 33 | 3 | −91 % |
+| `.Include(` em serviços | 58 | 27 | −53 % |
+| Buscas no banco só para descobrir quem é o solicitante | 17 | 0 | −100 % |
+| Literais `new MensagemMongo { ... }` | 14 | 0 | −100 % |
+| Exceções da BCL usadas como sinal de regra de negócio | 69 | 0 | −100 % |
+| Leituras de `IConfiguration[...]` e `GetConnectionString` | 16 | 3 | −81 % |
+| `[Authorize(Roles = "...")]` com string solta | 18 | 0 | −100 % |
+| DTOs de entrada mutáveis (`class` com `set`) | 12 | 0 | −100 % |
+| Pacotes NuGet | 9 | 7 | −22 % |
+| Artefatos de build versionados | 141 (37 MB) | 0 | −100 % |
+| Frontend TypeScript (`src/app`) | 2 961 | 2 978 | +1 % |
+| Template e CSS mortos do `AppComponent` | 336 | 0 | −100 % |
+| Usos de `any` no frontend | 11 | 0 | −100 % |
+| Testes automatizados | 0 | 59 (45 HTTP + 14 unitários) | novo |
+| Linhas de teste | 0 | 1 616 | novo |
+| Documentação (`.ai`, README, `docs/refactoring`) | 183 | 2 562 | +1 300 % |
+
+Como ler: o código de produção do backend encolheu 20 % no total, com os serviços (−40 %) e os controllers (−36 %) concentrando o ganho. `DTOs/` cresceu porque passou a hospedar o mapeador que antes estava copiado dentro dos serviços, e `Dominio/` e `Infraestrutura/` são 163 linhas novas que substituem repetição espalhada. O que cresceu de verdade foi o que não existia: testes e documentação.
 
 Diff da branch no backend (sem Migrations): 185 arquivos, 1 753 inserções, 8 027 remoções (as remoções incluem os 141 artefatos de build). Todos os 19 commits passam na suíte de caracterização que foi gravada contra o código original antes de qualquer mudança estrutural. As mudanças deliberadas de contrato estão na seção 5.
 
