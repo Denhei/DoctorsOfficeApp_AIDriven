@@ -251,7 +251,6 @@ public static class DbInitializer
             PacienteId = pacCarlos.Id.ToString(),
             InstituicaoId = instA.Id.ToString(),
             EtapaAtual = 8,
-            Status = "Concluida",
             ResumoPreliminar = new ResumoPreliminarMongo
             {
                 Queixa = "Dor no peito leve e cansaço",

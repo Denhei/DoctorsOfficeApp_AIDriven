@@ -201,10 +201,10 @@ public class TriagemAgendamentoTests(ApiFixture api)
         var slotAAgora = Assert.Single(await Slots(Seed.MedicoAId), s => s.G("id") == slotA.G("id"));
         Assert.False(slotAAgora.B("disponivel"));
 
-        // 8. Segunda triagem (ramos "Não") na outra clínica e conflito de horário do próprio paciente
+        // 8. Segunda triagem (ramos "Não sei" e "Sim, tomo") na outra clínica e conflito de horário do próprio paciente
         var (coletaB, conversaB) = await TriagemCompleta(mariana, Seed.InstB);
-        Assert.Equal("Nenhuma relatada", conversaB["resumoPreliminar"].S("alergias"));
-        Assert.Equal("Nenhum relatado", conversaB["resumoPreliminar"].S("medicamentos"));
+        Assert.Equal("Não sabe informar", conversaB["resumoPreliminar"].S("alergias"));
+        Assert.Equal("Losartana 50mg", conversaB["resumoPreliminar"].S("medicamentos"));
         Assert.Equal("Observação livre", conversaB["resumoPreliminar"].S("observacoes"));
 
         Assert.Equal(OK, (await enfB.PutAsJsonAsync($"/api/coletas/{coletaB}/validacao", new { aprovadoParaAgendamento = true, resumoCorrigido = "ok" })).StatusCode);
@@ -383,6 +383,43 @@ public class TriagemAgendamentoTests(ApiFixture api)
         Assert.Equal(4.5, dashGlobal!["mediaSatisfacao"]!.GetValue<double>());
     }
 
+    [Fact]
+    public async Task Roteiro_com_respostas_negativas_pula_as_etapas_de_detalhe()
+    {
+        var carlos = await api.ComoAsync(Seed.Carlos);
+        var conversa = await (await carlos.PostAsJsonAsync("/api/coletas", new { instituicaoId = Seed.InstA })).Json();
+        var coletaId = conversa.G("coletaId");
+        Assert.Contains("Olá, Carlos Silva!", Ultima(conversa).S("conteudo"));
+
+        conversa = await Responder(carlos, coletaId, "Sim, confirmo meus dados", "n1");
+        conversa = await Responder(carlos, coletaId, "Tosse seca", "n2");
+        conversa = await Responder(carlos, coletaId, "3 dias", "n3");
+        Assert.Equal(4, conversa.I("etapaAtual"));
+
+        conversa = await Responder(carlos, coletaId, "Não possuo alergias", "n4");
+        Assert.Equal(6, conversa.I("etapaAtual"));
+        Assert.Equal("Nenhuma relatada", conversa["resumoPreliminar"].S("alergias"));
+
+        conversa = await Responder(carlos, coletaId, "Não tomo medicamentos", "n5");
+        Assert.Equal(8, conversa.I("etapaAtual"));
+        Assert.Equal("Nenhum relatado", conversa["resumoPreliminar"].S("medicamentos"));
+
+        conversa = await Responder(carlos, coletaId, "Sinto tontura ao levantar", "n6");
+        Assert.Equal(9, conversa.I("etapaAtual"));
+        Assert.Equal("Sinto tontura ao levantar", conversa["resumoPreliminar"].S("observacoes"));
+        Assert.Contains("Observações: Sinto tontura ao levantar.", Ultima(conversa).S("conteudo"));
+        Assert.Equal("EmColeta", conversa.S("statusColeta"));
+
+        // Resposta vazia em etapa de texto vira "não informado"
+        var outra = await (await carlos.PostAsJsonAsync("/api/coletas", new { instituicaoId = Seed.InstA })).Json();
+        var outraId = outra.G("coletaId");
+        await Responder(carlos, outraId, "Sim, confirmo meus dados", "v1");
+        outra = await Responder(carlos, outraId, "   ", "v2");
+        Assert.Equal(3, outra.I("etapaAtual"));
+        Assert.Equal("não informado", outra["resumoPreliminar"].S("queixa"));
+        Assert.Equal("", Mensagens(outra)[^2].S("conteudo"));
+    }
+
     private static JsonArray Mensagens(JsonNode conversa) => conversa["mensagens"]!.AsArray();
 
     private static JsonNode Ultima(JsonNode conversa) => Mensagens(conversa)[^1]!;
@@ -401,7 +438,7 @@ public class TriagemAgendamentoTests(ApiFixture api)
         var conversa = await (await paciente.PostAsJsonAsync("/api/coletas", new { instituicaoId })).Json();
         var coletaId = conversa.G("coletaId");
         var prefixo = Guid.NewGuid().ToString("N");
-        var respostas = new[] { "Sim, confirmo meus dados", "Dor lombar", "1 semana", "Não possuo alergias", "Não tomo medicamentos", "Observação livre" };
+        var respostas = new[] { "Sim, confirmo meus dados", "Dor lombar", "1 semana", "Não sei informar", "Sim, tomo medicamentos", "Losartana 50mg", "Observação livre" };
         for (var i = 0; i < respostas.Length; i++)
             conversa = await Responder(paciente, coletaId, respostas[i], $"{prefixo}-{i}");
         Assert.Equal(9, conversa.I("etapaAtual"));
