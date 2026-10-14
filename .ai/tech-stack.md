@@ -7,9 +7,9 @@
 - **Database Drivers**: Npgsql (PostgreSQL), MongoDB.Driver 3.x (MongoDB)
 - **Authentication**: ASP.NET Identity + Microsoft.AspNetCore.Authentication.JwtBearer (JWT HS256)
 - **Configuração**: `IOptions<T>` tipadas (`JwtOptions`, `StorageOptions`), validadas na subida
-- **Erros HTTP**: um `IExceptionHandler` (`TratadorGlobalDeExcecoes`) traduz exceções de regra e de autorização para `{ mensagem }`
+- **Erros HTTP**: as exceções de domínio (`RegraDeNegocioException`, `ConflitoException`, `AcessoNegadoException`) viram `{ mensagem }` num único `IExceptionFilter` (`TratadorGlobalDeExcecoes`); falhas de infraestrutura continuam 500
 - **Dependency Injection**: container nativo do ASP.NET Core
-- **Mapping**: métodos de extensão `ToDto()` em `DTOs/Mapeamentos.cs` (sem AutoMapper)
+- **Mapping**: projeções `Expression<Func<Entidade, Dto>>` em `DTOs/Mapeamentos.cs`, usadas com `Select` (sem AutoMapper)
 - **Testing**: xUnit 2.9, Microsoft.AspNetCore.Mvc.Testing, Testcontainers (PostgreSQL 16 e MongoDB 7 reais)
 
 ## Frontend (TypeScript)

@@ -27,7 +27,7 @@
 ## ADR 005 – Single HTTP error policy
 - **Status**: Accepted (refactoring, 2026-10)
 - **Context**: Controllers repeated 27 `try/catch` blocks mapping exceptions to status codes, and some actions leaked 500 for expected business errors.
-- **Decision**: Services throw `InvalidOperationException` (400), `ConflitoException` (409) or `UnauthorizedAccessException` (403); one `IExceptionHandler` writes `{ mensagem }`. Controllers contain no error mapping.
+- **Decision**: Services throw the domain exceptions `RegraDeNegocioException` (400), `ConflitoException` (409) or `AcessoNegadoException` (403); one MVC `IExceptionFilter` writes `{ mensagem }`. Controllers contain no error mapping. BCL exceptions (configuration, disk, database) are never mapped and surface as 500.
 - **Consequences**: Uniform contract for the frontend; adding a status code means adding one case in one place.
 
 ## ADR 006 – Characterization tests as the refactoring safety net
