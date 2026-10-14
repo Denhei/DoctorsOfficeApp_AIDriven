@@ -62,6 +62,9 @@ public sealed class ApiFixture : IAsyncLifetime
         if (Directory.Exists(_uploads)) Directory.Delete(_uploads, recursive: true);
     }
 
+    public string MongoConnectionString => _mongo.GetConnectionString();
+    public const string MongoDatabaseName = "consultorio_mongo_db";
+
     public HttpClient Anonimo() => _factory.CreateClient();
 
     public async Task<HttpClient> ComoAsync(string email, string senha = Seed.Senha)
@@ -119,4 +122,14 @@ public static class HttpJson
     public static int I(this JsonNode? n, string prop) => n![prop]!.GetValue<int>();
     public static bool B(this JsonNode? n, string prop) => n![prop]!.GetValue<bool>();
     public static DateTime D(this JsonNode? n, string prop) => n![prop]!.GetValue<DateTime>();
+
+    public static MultipartFormDataContent Multipart(string nome, string contentType, string conteudo)
+        => Multipart(nome, contentType, System.Text.Encoding.UTF8.GetBytes(conteudo));
+
+    public static MultipartFormDataContent Multipart(string nome, string contentType, byte[] bytes)
+    {
+        var arquivo = new ByteArrayContent(bytes);
+        arquivo.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        return new MultipartFormDataContent { { arquivo, "arquivo", nome } };
+    }
 }

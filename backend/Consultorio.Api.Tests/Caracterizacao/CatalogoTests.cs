@@ -71,12 +71,15 @@ public class CatalogoTests(ApiFixture api)
     [Fact]
     public async Task Slots_filtram_por_data()
     {
-        var amanha = DateTime.UtcNow.Date.AddDays(1);
-        var resp = await api.Anonimo().GetAsync($"/api/slots?instituicaoId={Seed.InstB}&data={amanha:yyyy-MM-dd}");
+        var proximoDiaUtil = Enumerable.Range(1, 7)
+            .Select(d => DateTime.UtcNow.Date.AddDays(d))
+            .First(d => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday));
+        var resp = await api.Anonimo().GetAsync($"/api/slots?instituicaoId={Seed.InstB}&data={proximoDiaUtil:yyyy-MM-dd}");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var slots = await resp.JsonArray();
-        Assert.All(slots, s => Assert.Equal(amanha, s.D("inicioUtc").Date));
+        Assert.NotEmpty(slots);
+        Assert.All(slots, s => Assert.Equal(proximoDiaUtil, s.D("inicioUtc").Date));
     }
 
     [Fact]

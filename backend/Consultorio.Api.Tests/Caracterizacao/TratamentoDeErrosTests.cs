@@ -78,3 +78,112 @@ public class CorsEmErrosTests(ApiFixture api)
         Assert.Equal("Atendentes e Administradores Técnicos não possuem permissão de acesso ao histórico clínico.", await resp.Mensagem());
     }
 }
+
+/// <summary>
+/// Usuários com perfil mas sem o registro correspondente (o admin cria usuário Paciente sem Paciente,
+/// e cria o usuário Medico antes de recusar a falta de instituição). Dois destes casos respondiam 500
+/// no original (notificações e pesquisa); os demais preservam o comportamento.
+/// </summary>
+[Collection(ApiCollection.Nome)]
+public class UsuariosSemRegistroTests(ApiFixture api)
+{
+    [Fact]
+    public async Task Paciente_sem_registro_de_paciente()
+    {
+        var admin = await api.ComoAsync(Seed.Admin);
+        var email = $"paciente.sem.registro.{Guid.NewGuid():N}@consultorio.local";
+        var criado = await admin.PostAsJsonAsync("/api/admin/usuarios", new { nomeCompleto = "Sem Registro", email, senha = "Senha@123", perfil = "Paciente" });
+        Assert.Equal(HttpStatusCode.OK, criado.StatusCode);
+        Assert.Null((await criado.Json())!["pacienteId"]);
+
+        var usuario = await api.ComoAsync(email, "Senha@123");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await usuario.PostAsJsonAsync("/api/coletas", new { instituicaoId = Seed.InstA })).StatusCode);
+
+        var notificacoes = await usuario.GetAsync("/api/notificacoes");
+        Assert.Equal(HttpStatusCode.Forbidden, notificacoes.StatusCode);
+        Assert.Equal("Paciente não encontrado.", await notificacoes.Mensagem());
+
+        var pesquisa = await usuario.GetAsync($"/api/consultas/{Seed.ConsultaCarlos}/pesquisa");
+        Assert.Equal(HttpStatusCode.Forbidden, pesquisa.StatusCode);
+        Assert.Equal("Paciente não encontrado.", await pesquisa.Mensagem());
+
+        var consultas = await usuario.GetAsync("/api/consultas");
+        Assert.Equal(HttpStatusCode.OK, consultas.StatusCode);
+        Assert.Empty(await consultas.JsonArray());
+    }
+
+    [Fact]
+    public async Task Medico_sem_registro_de_medico()
+    {
+        var admin = await api.ComoAsync(Seed.Admin);
+        var email = $"medico.sem.registro.{Guid.NewGuid():N}@consultorio.local";
+        var criado = await admin.PostAsJsonAsync("/api/admin/usuarios", new { nomeCompleto = "Dr. Sem Registro", email, senha = "Senha@123", perfil = "Medico" });
+        Assert.Equal(HttpStatusCode.BadRequest, criado.StatusCode);
+
+        var medico = await api.ComoAsync(email, "Senha@123");
+
+        var historico = await medico.GetAsync($"/api/pacientes/{Seed.PacienteCarlos}/historico");
+        Assert.Equal(HttpStatusCode.Forbidden, historico.StatusCode);
+        Assert.Equal("Médico não encontrado.", await historico.Mensagem());
+
+        var download = await medico.GetAsync($"/api/documentos/{Seed.DocumentoCarlos}/arquivo");
+        Assert.Equal(HttpStatusCode.Forbidden, download.StatusCode);
+        Assert.Equal("Médico não encontrado.", await download.Mensagem());
+
+        var evolucao = await medico.PutAsJsonAsync($"/api/consultas/{Seed.ConsultaCarlos}/evolucao", new { texto = "x" });
+        Assert.Equal(HttpStatusCode.Forbidden, evolucao.StatusCode);
+        Assert.Equal("Usuário não é um médico cadastrado.", await evolucao.Mensagem());
+
+        var conclusao = await medico.PostAsync($"/api/consultas/{Seed.ConsultaCarlos}/conclusao", null);
+        Assert.Equal(HttpStatusCode.Forbidden, conclusao.StatusCode);
+        Assert.Equal("Usuário não é um médico.", await conclusao.Mensagem());
+
+        var porId = await medico.GetAsync($"/api/consultas/{Seed.ConsultaCarlos}");
+        Assert.Equal(HttpStatusCode.Forbidden, porId.StatusCode);
+        Assert.Equal("Acesso negado.", await porId.Mensagem());
+
+        Assert.Empty(await (await medico.GetAsync("/api/consultas")).JsonArray());
+    }
+
+    [Fact]
+    public async Task Enfermeiro_sem_instituicao_nao_ve_fila()
+    {
+        var admin = await api.ComoAsync(Seed.Admin);
+        var email = $"enf.sem.inst.{Guid.NewGuid():N}@consultorio.local";
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/admin/usuarios", new { nomeCompleto = "Enf. Sem Instituição", email, senha = "Senha@123", perfil = "Enfermeiro" })).StatusCode);
+
+        var enfermeiro = await api.ComoAsync(email, "Senha@123");
+        var fila = await enfermeiro.GetAsync("/api/coletas");
+
+        Assert.Equal(HttpStatusCode.Forbidden, fila.StatusCode);
+        Assert.Equal(0, fila.Content.Headers.ContentLength ?? 0);
+    }
+}
+
+/// <summary>Paciente inexistente: as três rotas respondiam 500 no original e agora 400 { mensagem }.</summary>
+[Collection(ApiCollection.Nome)]
+public class PacienteInexistenteTests(ApiFixture api)
+{
+    [Fact]
+    public async Task Historico_documentos_e_autorizacoes_de_paciente_inexistente_retornam_400()
+    {
+        var carlos = await api.ComoAsync(Seed.Carlos);
+        var inexistente = Guid.NewGuid();
+
+        foreach (var rota in new[] { "historico", "documentos", "autorizacoes" })
+        {
+            var resp = await carlos.GetAsync($"/api/pacientes/{inexistente}/{rota}");
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("Paciente não encontrado.", await resp.Mensagem());
+        }
+
+        var conceder = await carlos.PostAsJsonAsync($"/api/pacientes/{inexistente}/autorizacoes", new { instituicaoOrigemId = Seed.InstA, instituicaoDestinoId = Seed.InstB });
+        Assert.Equal(HttpStatusCode.BadRequest, conceder.StatusCode);
+        Assert.Equal("Paciente não encontrado.", await conceder.Mensagem());
+
+        var atualizar = await (await api.ComoAsync(Seed.AtendenteA)).PatchAsJsonAsync($"/api/pacientes/{inexistente}", new { telefoneFicticio = "x" });
+        Assert.Equal(HttpStatusCode.BadRequest, atualizar.StatusCode);
+        Assert.Equal("Paciente não encontrado.", await atualizar.Mensagem());
+    }
+}

@@ -109,13 +109,13 @@ public class ProntuarioTests(ApiFixture api)
         var mariana = await api.ComoAsync(Seed.Mariana);
         var url = $"/api/pacientes/{Seed.PacienteMariana}/documentos?instituicaoOrigemId={Seed.InstA}";
 
-        using var txt = Multipart("laudo.txt", "text/plain", "conteudo");
+        using var txt = HttpJson.Multipart("laudo.txt", "text/plain", "conteudo");
         var invalido = await mariana.PostAsync(url, txt);
         Assert.Equal(HttpStatusCode.BadRequest, invalido.StatusCode);
         Assert.Equal("Formato de arquivo não suportado. Utilize PDF, JPG ou PNG.", await invalido.Mensagem());
 
         var bytes = "%PDF-1.4 conteudo ficticio"u8.ToArray();
-        using var pdf = Multipart("Laudo Mariana.pdf", "application/pdf", bytes);
+        using var pdf = HttpJson.Multipart("Laudo Mariana.pdf", "application/pdf", bytes);
         var ok = await mariana.PostAsync(url, pdf);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         var doc = await ok.Json();
@@ -145,7 +145,7 @@ public class ProntuarioTests(ApiFixture api)
     public async Task Upload_por_atendente_e_negado()
     {
         var atendente = await api.ComoAsync(Seed.AtendenteA);
-        using var pdf = Multipart("x.pdf", "application/pdf", "x");
+        using var pdf = HttpJson.Multipart("x.pdf", "application/pdf", "x");
         var resp = await atendente.PostAsync($"/api/pacientes/{Seed.PacienteMariana}/documentos?instituicaoOrigemId={Seed.InstA}", pdf);
 
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
@@ -236,13 +236,26 @@ public class ProntuarioTests(ApiFixture api)
         Assert.Equal(HttpStatusCode.Forbidden, equipe.StatusCode);
     }
 
-    private static MultipartFormDataContent Multipart(string nome, string contentType, string conteudo)
-        => Multipart(nome, contentType, System.Text.Encoding.UTF8.GetBytes(conteudo));
-
-    private static MultipartFormDataContent Multipart(string nome, string contentType, byte[] bytes)
+    [Fact]
+    public async Task Upload_acima_de_5_MB_e_recusado()
     {
-        var arquivo = new ByteArrayContent(bytes);
-        arquivo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
-        return new MultipartFormDataContent { { arquivo, "arquivo", nome } };
+        var mariana = await api.ComoAsync(Seed.Mariana);
+        using var grande = HttpJson.Multipart("grande.pdf", "application/pdf", new byte[5 * 1024 * 1024 + 1]);
+
+        var resp = await mariana.PostAsync($"/api/pacientes/{Seed.PacienteMariana}/documentos?instituicaoOrigemId={Seed.InstA}", grande);
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Equal("O arquivo excede o limite máximo permitido de 5 MB.", await resp.Mensagem());
+    }
+
+    [Fact]
+    public async Task Enfermeiro_baixa_qualquer_documento()
+    {
+        // Brecha herdada e congelada: o download só restringe Paciente, Medico, Atendente e Admin;
+        // não há ramo para Enfermeiro. Listada em "bugs observados" do relatório.
+        var enfermeiroB = await api.ComoAsync(Seed.EnfermeiroB);
+        var resp = await enfermeiroB.GetAsync($"/api/documentos/{Seed.DocumentoCarlos}/arquivo");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
 }

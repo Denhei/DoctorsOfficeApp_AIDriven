@@ -125,6 +125,15 @@ public class TriagemAgendamentoTests(ApiFixture api)
         Assert.Equal(BadRequest, depois.StatusCode);
         Assert.Equal("Esta coleta já foi enviada para triagem e não pode receber novas respostas.", await depois.Mensagem());
 
+        var finalizarAlheia = await carlos.PostAsync($"/api/coletas/{coletaId}/finalizacao", null);
+        Assert.Equal(Forbidden, finalizarAlheia.StatusCode);
+        Assert.Equal("Acesso negado.", await finalizarAlheia.Mensagem());
+        var finalizarInexistente = await mariana.PostAsync($"/api/coletas/{Guid.NewGuid()}/finalizacao", null);
+        Assert.Equal(BadRequest, finalizarInexistente.StatusCode);
+        Assert.Equal("Coleta não encontrada.", await finalizarInexistente.Mensagem());
+        var mensagemAlheia = await carlos.PostAsJsonAsync($"/api/coletas/{coletaId}/mensagens", new { conteudo = "x", clienteMessageId = "m10" });
+        Assert.Equal(Forbidden, mensagemAlheia.StatusCode);
+
         // 5. Fila do enfermeiro é por instituição
         var filaA = await (await enfA.GetAsync("/api/coletas")).JsonArray();
         var item = Assert.Single(filaA, c => c.G("id") == coletaId);
@@ -381,6 +390,63 @@ public class TriagemAgendamentoTests(ApiFixture api)
         Assert.Equal(1, dashGlobal.I("totalConsultasCanceladas"));
         Assert.Equal(2, dashGlobal.I("totalPesquisasRespondidas"));
         Assert.Equal(4.5, dashGlobal!["mediaSatisfacao"]!.GetValue<double>());
+
+        // 15. Consentimento entre instituições: a Dra. Ana Paula (São Bento) tem consulta com Mariana,
+        // então passa no vínculo; os dados originados em Santa Maria só aparecem com autorização ativa.
+        using var laudo = HttpJson.Multipart("laudo-santa-maria.pdf", "application/pdf", "%PDF-1.4 laudo");
+        var docA = await (await mariana.PostAsync($"/api/pacientes/{Seed.PacienteMariana}/documentos?instituicaoOrigemId={Seed.InstA}", laudo)).Json();
+        var docAId = docA.G("id");
+
+        var histSemAutorizacao = await (await medB.GetAsync($"/api/pacientes/{Seed.PacienteMariana}/historico")).Json();
+        Assert.Contains(histSemAutorizacao["consultas"]!.AsArray(), c => c.G("id") == consultaBId);
+        Assert.DoesNotContain(histSemAutorizacao["consultas"]!.AsArray(), c => c.G("id") == consultaId);
+        Assert.Empty(histSemAutorizacao["evolucoes"]!.AsArray());
+        Assert.DoesNotContain(histSemAutorizacao["documentos"]!.AsArray(), d => d.G("id") == docAId);
+
+        var downloadNegado = await medB.GetAsync($"/api/documentos/{docAId}/arquivo");
+        Assert.Equal(Forbidden, downloadNegado.StatusCode);
+        Assert.Equal("Acesso negado: Autorização de compartilhamento ausente ou revogada.", await downloadNegado.Mensagem());
+
+        var autorizacao = await (await mariana.PostAsJsonAsync($"/api/pacientes/{Seed.PacienteMariana}/autorizacoes", new { instituicaoOrigemId = Seed.InstA, instituicaoDestinoId = Seed.InstB })).Json();
+
+        var histComAutorizacao = await (await medB.GetAsync($"/api/pacientes/{Seed.PacienteMariana}/historico")).Json();
+        Assert.Contains(histComAutorizacao["consultas"]!.AsArray(), c => c.G("id") == consultaId);
+        Assert.Contains(histComAutorizacao["evolucoes"]!.AsArray(), e => e.G("id") == ev.G("id"));
+        Assert.Contains(histComAutorizacao["documentos"]!.AsArray(), d => d.G("id") == docAId);
+        Assert.Single(histComAutorizacao["autorizacoesAtivas"]!.AsArray(), a => a.G("id") == autorizacao.G("id"));
+        Assert.Equal(OK, (await medB.GetAsync($"/api/documentos/{docAId}/arquivo")).StatusCode);
+        Assert.Equal(OK, (await medA.GetAsync($"/api/documentos/{docAId}/arquivo")).StatusCode);
+
+        Assert.Equal(OK, (await mariana.DeleteAsync($"/api/autorizacoes/{autorizacao.G("id")}")).StatusCode);
+
+        var histRevogado = await (await medB.GetAsync($"/api/pacientes/{Seed.PacienteMariana}/historico")).Json();
+        Assert.DoesNotContain(histRevogado["consultas"]!.AsArray(), c => c.G("id") == consultaId);
+        Assert.DoesNotContain(histRevogado["documentos"]!.AsArray(), d => d.G("id") == docAId);
+        Assert.Empty(histRevogado["autorizacoesAtivas"]!.AsArray());
+        Assert.Equal(Forbidden, (await medB.GetAsync($"/api/documentos/{docAId}/arquivo")).StatusCode);
+        Assert.Equal(OK, (await medA.GetAsync($"/api/documentos/{docAId}/arquivo")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Validacao_reprovada_encaminha_para_atendimento_presencial()
+    {
+        var carlos = await api.ComoAsync(Seed.Carlos);
+        var enfA = await api.ComoAsync(Seed.EnfermeiroA);
+        var (coletaId, _) = await TriagemCompleta(carlos, Seed.InstA);
+
+        var reprovada = await enfA.PutAsJsonAsync($"/api/coletas/{coletaId}/validacao", new { aprovadoParaAgendamento = false, resumoCorrigido = "Dor lombar há 1 semana", observacaoEnfermeiro = "Sinais de alerta: procurar emergência." });
+        Assert.Equal(OK, reprovada.StatusCode);
+
+        var conversa = await (await carlos.GetAsync($"/api/coletas/{coletaId}")).Json();
+        Assert.Equal("EncaminhadaPresencial", conversa.S("statusColeta"));
+        Assert.Equal("Dor lombar há 1 semana", conversa.S("resumoValidado"));
+        Assert.Contains("Orientação da Enfermagem", Ultima(conversa).S("conteudo"));
+        Assert.Contains("Sinais de alerta: procurar emergência.", Ultima(conversa).S("conteudo"));
+
+        var slot = await PrimeiroSlotDisponivel(Seed.MedicoAId);
+        var agendar = await carlos.PostAsJsonAsync("/api/consultas", new { pacienteId = Seed.PacienteCarlos, slotId = slot.G("id"), coletaId });
+        Assert.Equal(BadRequest, agendar.StatusCode);
+        Assert.Equal("O agendamento só é permitido após a validação da triagem pelo enfermeiro.", await agendar.Mensagem());
     }
 
     [Fact]
