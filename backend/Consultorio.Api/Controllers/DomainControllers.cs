@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Models.Enums;
 using Consultorio.Api.Services;
@@ -8,9 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Consultorio.Api.Controllers;
 
-[ApiController]
-[Route("api")]
-public class ConsultorioControllerBase : ControllerBase
+public abstract class ConsultorioControllerBase : ControllerBase
 {
     protected Guid GetUserId()
     {
@@ -193,12 +190,10 @@ public class PacientesController : ConsultorioControllerBase
 public class ColetasController : ConsultorioControllerBase
 {
     private readonly ITriagemChatService _chatService;
-    private readonly AppDbContext _context;
 
-    public ColetasController(ITriagemChatService chatService, AppDbContext context)
+    public ColetasController(ITriagemChatService chatService)
     {
         _chatService = chatService;
-        _context = context;
     }
 
     [HttpPost]

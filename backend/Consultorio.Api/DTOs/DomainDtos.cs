@@ -35,7 +35,6 @@ public class EnviarMensagemChatDto
 {
     public string Conteudo { get; set; } = string.Empty;
     public string? ClienteMessageId { get; set; }
-    public int? EtapaEsperada { get; set; }
 }
 
 public record ResumoPreliminarDto(

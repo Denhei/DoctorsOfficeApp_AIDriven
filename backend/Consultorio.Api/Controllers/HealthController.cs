@@ -38,7 +38,7 @@ public class HealthController : ControllerBase
 
         try
         {
-            var count = await _mongoContext.Conversas.CountDocumentsAsync(new BsonDocument());
+            await _mongoContext.Conversas.CountDocumentsAsync(new BsonDocument());
             mongoOk = true;
         }
         catch

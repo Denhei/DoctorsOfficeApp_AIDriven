@@ -3,6 +3,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Consultorio.Api.Models.Mongo;
 
+[BsonIgnoreExtraElements]
 public class ConversaMongo
 {
     [BsonId]
@@ -19,8 +20,6 @@ public class ConversaMongo
     public string InstituicaoId { get; set; } = string.Empty;
 
     public int EtapaAtual { get; set; } = 1;
-
-    public int VersaoRoteiro { get; set; } = 1;
 
     public string Status { get; set; } = "EmAndamento"; // EmAndamento, Concluida, Cancelada
 

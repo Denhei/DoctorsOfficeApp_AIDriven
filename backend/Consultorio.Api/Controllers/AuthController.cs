@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -8,7 +7,7 @@ namespace Consultorio.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public class AuthController : ConsultorioControllerBase
 {
     private readonly IAuthService _authService;
 
@@ -44,8 +43,8 @@ public class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Me()
     {
-        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        var userId = GetUserId();
+        if (userId == Guid.Empty)
         {
             return Unauthorized();
         }

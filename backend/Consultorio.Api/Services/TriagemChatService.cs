@@ -62,7 +62,6 @@ public class TriagemChatService : ITriagemChatService
             PacienteId = pacienteId.ToString(),
             InstituicaoId = instituicaoId.ToString(),
             EtapaAtual = 1,
-            VersaoRoteiro = 1,
             Status = "EmAndamento",
             ResumoPreliminar = new ResumoPreliminarMongo(),
             Mensagens = new List<MensagemMongo>
