@@ -29,5 +29,5 @@ public class AuthService(UserManager<Usuario> userManager, AppDbContext context,
     }
 
     public Task<UsuarioInfoDto?> ObterUsuarioAtualAsync(Guid usuarioId)
-        => userManager.Users.Where(u => u.Id == usuarioId).ProjetarInfo(context).FirstOrDefaultAsync();
+        => userManager.Users.Where(u => u.Id == usuarioId).Select(Mapeamentos.UsuarioInfo(context)).FirstOrDefaultAsync();
 }

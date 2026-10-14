@@ -22,12 +22,11 @@ public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesq
     {
         var pacienteId = PacienteIdDe(paciente);
 
-        var notificacoes = await context.NotificacoesSimuladas
+        return await context.NotificacoesSimuladas
             .Where(n => n.PacienteId == pacienteId)
             .OrderByDescending(n => n.CriadaEmUtc)
+            .Select(Mapeamentos.Notificacao)
             .ToListAsync();
-
-        return notificacoes.Select(n => n.ToDto()).ToList();
     }
 
     public async Task<PesquisaSatisfacaoDto?> ObterPesquisaConsultaAsync(Guid consultaId, UsuarioAtual paciente)
@@ -140,7 +139,7 @@ public class InstituicaoService(AppDbContext context) : IInstituicaoService
     public Task<List<InstituicaoDto>> ListarInstituicoesAsync()
         => context.Instituicoes
             .Where(i => i.Ativa)
-            .Select(i => new InstituicaoDto(i.Id, i.Nome, i.RazaoSocial, i.Ativa))
+            .Select(Mapeamentos.Instituicao)
             .ToListAsync();
 
     public Task<List<MedicoDto>> ListarMedicosAsync(Guid? instituicaoId)
@@ -152,15 +151,7 @@ public class InstituicaoService(AppDbContext context) : IInstituicaoService
             query = query.Where(m => m.InstituicaoId == instituicaoId.Value);
         }
 
-        return query.Select(m => new MedicoDto(
-            m.Id,
-            m.UsuarioId,
-            m.Usuario.NomeCompleto,
-            m.Especialidade,
-            m.CrmFicticio,
-            m.InstituicaoId,
-            m.Instituicao.Nome
-        )).ToListAsync();
+        return query.Select(Mapeamentos.Medico).ToListAsync();
     }
 }
 
@@ -175,11 +166,8 @@ public interface IPacienteService
 
 public class PacienteService(AppDbContext context, UserManager<Usuario> userManager) : IPacienteService
 {
-    public async Task<List<PacienteDto>> ListarPacientesAsync()
-    {
-        var pacientes = await context.Pacientes.ToListAsync();
-        return pacientes.Select(p => p.ToDto()).ToList();
-    }
+    public Task<List<PacienteDto>> ListarPacientesAsync()
+        => context.Pacientes.Select(Mapeamentos.Paciente).ToListAsync();
 
     public async Task<PacienteDto?> ObterPacientePorIdAsync(Guid id, UsuarioAtual solicitante)
     {
@@ -246,7 +234,7 @@ public interface IAdminService
 public class AdminService(AppDbContext context, UserManager<Usuario> userManager) : IAdminService
 {
     public Task<List<UsuarioInfoDto>> ListarUsuariosAsync()
-        => userManager.Users.ProjetarInfo(context).ToListAsync();
+        => userManager.Users.Select(Mapeamentos.UsuarioInfo(context)).ToListAsync();
 
     public async Task<UsuarioInfoDto> CriarUsuarioAsync(CriarUsuarioAdminDto dto)
     {
@@ -267,6 +255,6 @@ public class AdminService(AppDbContext context, UserManager<Usuario> userManager
             await context.SaveChangesAsync();
         }
 
-        return await userManager.Users.Where(u => u.Id == usuario.Id).ProjetarInfo(context).FirstAsync();
+        return await userManager.Users.Where(u => u.Id == usuario.Id).Select(Mapeamentos.UsuarioInfo(context)).FirstAsync();
     }
 }

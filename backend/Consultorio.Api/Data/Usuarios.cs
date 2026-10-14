@@ -1,5 +1,4 @@
 using Consultorio.Api.Dominio;
-using Consultorio.Api.DTOs;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Microsoft.AspNetCore.Identity;
@@ -8,21 +7,6 @@ namespace Consultorio.Api.Data;
 
 public static class Usuarios
 {
-    /// <summary>
-    /// Projeção única de Usuario para UsuarioInfoDto. PacienteId e MedicoId são resolvidos no próprio SQL,
-    /// o que elimina a consulta extra por usuário (N+1) que existia em cada chamador.
-    /// </summary>
-    public static IQueryable<UsuarioInfoDto> ProjetarInfo(this IQueryable<Usuario> usuarios, AppDbContext db) =>
-        usuarios.Select(u => new UsuarioInfoDto(
-            u.Id,
-            u.NomeCompleto,
-            u.Email ?? string.Empty,
-            u.Perfil,
-            u.InstituicaoId,
-            u.Instituicao != null ? u.Instituicao.Nome : null,
-            db.Pacientes.Where(p => p.UsuarioId == u.Id).Select(p => (Guid?)p.Id).FirstOrDefault(),
-            db.Medicos.Where(m => m.UsuarioId == u.Id).Select(m => (Guid?)m.Id).FirstOrDefault()));
-
     /// <summary>Cria o usuário do Identity já confirmado e no papel do seu perfil.</summary>
     public static async Task<Usuario> CriarUsuarioAsync(
         this UserManager<Usuario> userManager,

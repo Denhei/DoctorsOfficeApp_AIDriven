@@ -77,11 +77,15 @@ public class Paciente
     public ICollection<DocumentoPaciente> Documentos { get; set; } = new List<DocumentoPaciente>();
     public ICollection<AutorizacaoCompartilhamento> Autorizacoes { get; set; } = new List<AutorizacaoCompartilhamento>();
 
-    /// <summary>Consentimento vigente para a instituição de destino ver dados originados na instituição de origem.</summary>
-    public bool TemAutorizacaoAtiva(Guid instituicaoOrigemId, Guid instituicaoDestinoId)
-        => Autorizacoes.Any(a => a.InstituicaoOrigemId == instituicaoOrigemId
-                              && a.InstituicaoDestinoId == instituicaoDestinoId
-                              && a.RevogadaEmUtc == null);
+    /// <summary>
+    /// Política clínica: uma instituição vê um dado deste paciente quando é a origem do dado ou quando o
+    /// paciente concedeu, e não revogou, compartilhamento da origem para ela. Exige Autorizacoes carregadas.
+    /// </summary>
+    public bool InstituicaoPodeVer(Guid instituicaoLeitoraId, Guid instituicaoOrigemId)
+        => instituicaoOrigemId == instituicaoLeitoraId
+           || Autorizacoes.Any(a => a.InstituicaoOrigemId == instituicaoOrigemId
+                                 && a.InstituicaoDestinoId == instituicaoLeitoraId
+                                 && a.RevogadaEmUtc == null);
 }
 
 public class Medico

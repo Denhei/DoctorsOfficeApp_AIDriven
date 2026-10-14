@@ -21,11 +21,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
 {
     public async Task<List<SlotAgendaDto>> ListarSlotsAsync(Guid? medicoId, Guid? instituicaoId, DateTime? data)
     {
-        var query = context.SlotsAgenda
-            .Include(s => s.Medico).ThenInclude(m => m.Usuario)
-            .Include(s => s.Instituicao)
-            .Include(s => s.Consultas)
-            .AsQueryable();
+        var query = context.SlotsAgenda.AsQueryable();
 
         if (medicoId.HasValue)
         {
@@ -44,20 +40,16 @@ public class AgendaService(AppDbContext context) : IAgendaService
             query = query.Where(s => s.InicioUtc >= inicioDia && s.InicioUtc < fimDia);
         }
 
-        var slots = await query.OrderBy(s => s.InicioUtc).ToListAsync();
-
-        return slots
-            .Select(s => s.ToDto(disponivel: !s.Consultas.Any(c => c.Status != StatusConsulta.Cancelada)))
-            .ToList();
+        return await query.OrderBy(s => s.InicioUtc).Select(Mapeamentos.Slot).ToListAsync();
     }
 
     public async Task<SlotAgendaDto> CriarSlotAsync(CriarSlotDto dto, Guid instituicaoId)
     {
-        var medico = await context.Medicos
-            .Include(m => m.Usuario)
-            .Include(m => m.Instituicao)
-            .FirstOrDefaultAsync(m => m.Id == dto.MedicoId && m.InstituicaoId == instituicaoId)
-            ?? throw new RegraDeNegocioException("Médico não encontrado ou não pertence a esta instituição.");
+        var medicoExiste = await context.Medicos.AnyAsync(m => m.Id == dto.MedicoId && m.InstituicaoId == instituicaoId);
+        if (!medicoExiste)
+        {
+            throw new RegraDeNegocioException("Médico não encontrado ou não pertence a esta instituição.");
+        }
 
         if (dto.FimUtc <= dto.InicioUtc)
         {
@@ -74,10 +66,8 @@ public class AgendaService(AppDbContext context) : IAgendaService
 
         var slot = new SlotAgenda
         {
-            MedicoId = medico.Id,
-            Medico = medico,
+            MedicoId = dto.MedicoId,
             InstituicaoId = instituicaoId,
-            Instituicao = medico.Instituicao,
             InicioUtc = dto.InicioUtc,
             FimUtc = dto.FimUtc
         };
@@ -85,7 +75,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
         context.SlotsAgenda.Add(slot);
         await context.SaveChangesAsync();
 
-        return slot.ToDto(disponivel: true);
+        return await context.SlotsAgenda.Where(s => s.Id == slot.Id).Select(Mapeamentos.Slot).FirstAsync();
     }
 
     public async Task<ConsultaDto> AgendarConsultaAsync(AgendarConsultaDto dto, UsuarioAtual solicitante)
@@ -111,10 +101,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
             throw new RegraDeNegocioException("O agendamento só é permitido após a validação da triagem pelo enfermeiro.");
         }
 
-        var slot = await context.SlotsAgenda
-            .Include(s => s.Medico).ThenInclude(m => m.Usuario)
-            .Include(s => s.Instituicao)
-            .FirstOrDefaultAsync(s => s.Id == dto.SlotId)
+        var slot = await context.SlotsAgenda.FirstOrDefaultAsync(s => s.Id == dto.SlotId)
             ?? throw new RegraDeNegocioException("Slot de agenda não encontrado.");
 
         if (slot.InstituicaoId != coleta.InstituicaoId)
@@ -149,25 +136,23 @@ public class AgendaService(AppDbContext context) : IAgendaService
         var consulta = new Consulta
         {
             PacienteId = paciente.Id,
-            Paciente = paciente,
             SlotId = slot.Id,
-            Slot = slot,
             ColetaId = coleta.Id,
-            Coleta = coleta,
             Status = StatusConsulta.Agendada,
             CriadaEmUtc = DateTime.UtcNow
         };
 
         context.Consultas.Add(consulta);
         await context.SaveChangesAsync();
+        var dtoAgendada = await context.Consultas.Where(c => c.Id == consulta.Id).Select(Mapeamentos.Consulta).FirstAsync();
         await transaction.CommitAsync();
 
-        return consulta.ToDto();
+        return dtoAgendada;
     }
 
     public async Task<List<ConsultaDto>> ListarConsultasAsync(UsuarioAtual solicitante, Guid? instituicaoId, Guid? pacienteId)
     {
-        var query = context.Consultas.ComDetalhes();
+        var query = context.Consultas.AsQueryable();
 
         switch (solicitante.Perfil)
         {
@@ -200,9 +185,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
             query = query.Where(c => c.PacienteId == pacienteId.Value);
         }
 
-        var consultas = await query.OrderByDescending(c => c.Slot.InicioUtc).ToListAsync();
-
-        return consultas.Select(c => c.ToDto()).ToList();
+        return await query.OrderByDescending(c => c.Slot.InicioUtc).Select(Mapeamentos.Consulta).ToListAsync();
     }
 
     public async Task<ConsultaDto?> ObterConsultaPorIdAsync(Guid consultaId, UsuarioAtual solicitante)

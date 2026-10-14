@@ -55,7 +55,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
 
         await mongo.Conversas.InsertOneAsync(conversa);
 
-        return MapearDetalheDto(coleta, conversa);
+        return coleta.ToDetalheDto(conversa);
     }
 
     public async Task<ConversaDetalheDto?> ObterConversaPorColetaIdAsync(Guid coletaId, UsuarioAtual solicitante)
@@ -75,7 +75,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         var conversa = await ConversaAsync(coleta.ConversaId);
         if (conversa == null) return null;
 
-        return MapearDetalheDto(coleta, conversa);
+        return coleta.ToDetalheDto(conversa);
     }
 
     public async Task<ConversaDetalheDto> ProcessarMensagemAsync(Guid coletaId, UsuarioAtual solicitante, EnviarMensagemChatDto dto)
@@ -93,7 +93,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         // Reenvio do mesmo ClienteMessageId devolve o estado atual sem reprocessar.
         if (!string.IsNullOrEmpty(dto.ClienteMessageId) && conversa.Mensagens.Any(m => m.ClienteMessageId == dto.ClienteMessageId))
         {
-            return MapearDetalheDto(coleta, conversa);
+            return coleta.ToDetalheDto(conversa);
         }
 
         var resposta = dto.Conteudo.Trim();
@@ -112,7 +112,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
 
         await SalvarConversaAsync(conversa);
 
-        return MapearDetalheDto(coleta, conversa);
+        return coleta.ToDetalheDto(conversa);
     }
 
     public async Task<ConversaDetalheDto> FinalizarEnvioEnfermeiroAsync(Guid coletaId, UsuarioAtual solicitante)
@@ -128,7 +128,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         conversa.Mensagens.Add(MensagemMongo.Bot("✅ Sua coleta foi enviada com sucesso! Um enfermeiro da nossa equipe irá revisar seus dados para liberar a escolha de horários na agenda."));
         await SalvarConversaAsync(conversa);
 
-        return MapearDetalheDto(coleta, conversa);
+        return coleta.ToDetalheDto(conversa);
     }
 
     public async Task<List<ColetaItemFilaDto>> ListarFilaEnfermeiroAsync(Guid enfermeiroInstituicaoId)
@@ -144,16 +144,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         var conversas = (await mongo.Conversas.Find(c => ids.Contains(c.Id)).ToListAsync())
             .ToDictionary(c => c.Id);
 
-        return coletas.Select(c => new ColetaItemFilaDto(
-            c.Id,
-            c.PacienteId,
-            c.Paciente.Nome,
-            c.InstituicaoId,
-            c.Instituicao.Nome,
-            c.Status,
-            c.CriadaEmUtc,
-            conversas.GetValueOrDefault(c.ConversaId.ToString())?.ResumoPreliminar.GerarTextoFormatado()
-        )).ToList();
+        return coletas.Select(c => c.ToFilaDto(conversas.GetValueOrDefault(c.ConversaId.ToString()))).ToList();
     }
 
     public async Task<bool> ValidarColetaAsync(Guid coletaId, UsuarioAtual enfermeiro, ValidarColetaDto dto)
@@ -212,31 +203,4 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         return mongo.Conversas.ReplaceOneAsync(c => c.Id == conversa.Id, conversa);
     }
 
-    private static ConversaDetalheDto MapearDetalheDto(ColetaInicial coleta, ConversaMongo conversa)
-    {
-        var mensagens = conversa.Mensagens
-            .Select(m => new MensagemChatDto(m.Id, m.Remetente, m.Conteudo, m.Tipo, m.Opcoes, m.EnviadaEmUtc))
-            .ToList();
-
-        var resumo = new ResumoPreliminarDto(
-            conversa.ResumoPreliminar.Queixa,
-            conversa.ResumoPreliminar.Duracao,
-            conversa.ResumoPreliminar.Alergias,
-            conversa.ResumoPreliminar.Medicamentos,
-            conversa.ResumoPreliminar.Observacoes);
-
-        return new ConversaDetalheDto(
-            coleta.Id,
-            conversa.Id,
-            coleta.PacienteId,
-            coleta.Paciente.Nome,
-            coleta.InstituicaoId,
-            coleta.Instituicao.Nome,
-            coleta.Status,
-            conversa.EtapaAtual,
-            resumo,
-            coleta.ResumoValidado,
-            mensagens,
-            conversa.CriadaEmUtc);
-    }
 }

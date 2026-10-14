@@ -33,7 +33,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         var consulta = await context.Consultas
             .Include(c => c.Slot)
-            .Include(c => c.Evolucao).ThenInclude(e => e!.Medico).ThenInclude(m => m.Usuario)
+            .Include(c => c.Evolucao)
             .FirstOrDefaultAsync(c => c.Id == consultaId)
             ?? throw new RegraDeNegocioException("Consulta não encontrada.");
 
@@ -49,8 +49,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         if (consulta.Evolucao == null)
         {
-            var autor = await context.Medicos.Include(m => m.Usuario).FirstAsync(m => m.Id == medicoId);
-            consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medicoId, Medico = autor };
+            consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medicoId };
             context.Evolucoes.Add(consulta.Evolucao);
         }
 
@@ -59,7 +58,8 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         await context.SaveChangesAsync();
 
-        return consulta.Evolucao.ToDto();
+        var evolucaoId = consulta.Evolucao.Id;
+        return await context.Evolucoes.Where(e => e.Id == evolucaoId).Select(Mapeamentos.Evolucao).FirstAsync();
     }
 
     public async Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, UsuarioAtual medico)
@@ -144,7 +144,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
                 {
                     throw new AcessoNegadoException("Médico só pode acessar o histórico de pacientes com consulta vinculada sob sua responsabilidade.");
                 }
-                podeVerOrigem = origem => origem == medico.InstituicaoId || paciente.TemAutorizacaoAtiva(origem, medico.InstituicaoId);
+                podeVerOrigem = origem => paciente.InstituicaoPodeVer(medico.InstituicaoId, origem);
                 break;
 
             default:
@@ -195,14 +195,10 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         var chaveArquivo = await arquivos.SalvarAsync(arquivo, extensao);
 
-        var instituicao = await context.Instituicoes.FindAsync(instituicaoOrigemId);
-
         var documento = new DocumentoPaciente
         {
             PacienteId = pacienteId,
-            Paciente = paciente,
             InstituicaoOrigemId = instituicaoOrigemId,
-            InstituicaoOrigem = instituicao!,
             NomeOriginal = Path.GetFileName(arquivo.FileName),
             Tipo = arquivo.ContentType,
             Extensao = extensao,
@@ -214,7 +210,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         context.DocumentosPaciente.Add(documento);
         await context.SaveChangesAsync();
 
-        return documento.ToDto();
+        return await context.DocumentosPaciente.Where(d => d.Id == documento.Id).Select(Mapeamentos.Documento).FirstAsync();
     }
 
     public async Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, UsuarioAtual solicitante)
@@ -248,8 +244,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
             var temConsulta = await context.Consultas.AnyAsync(c => c.PacienteId == documento.PacienteId && c.Slot.MedicoId == medico.Id);
             if (!temConsulta) throw new AcessoNegadoException("Acesso negado.");
 
-            if (documento.InstituicaoOrigemId != medico.InstituicaoId
-                && !documento.Paciente.TemAutorizacaoAtiva(documento.InstituicaoOrigemId, medico.InstituicaoId))
+            if (!documento.Paciente.InstituicaoPodeVer(medico.InstituicaoId, documento.InstituicaoOrigemId))
             {
                 throw new AcessoNegadoException("Acesso negado: Autorização de compartilhamento ausente ou revogada.");
             }
@@ -277,17 +272,11 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
             throw new RegraDeNegocioException("Instituição de origem e destino devem ser diferentes.");
         }
 
-        var origem = await context.Instituicoes.FindAsync(dto.InstituicaoOrigemId);
-        var destino = await context.Instituicoes.FindAsync(dto.InstituicaoDestinoId);
-
         var autorizacao = new AutorizacaoCompartilhamento
         {
             PacienteId = pacienteId,
-            Paciente = paciente,
             InstituicaoOrigemId = dto.InstituicaoOrigemId,
-            InstituicaoOrigem = origem!,
             InstituicaoDestinoId = dto.InstituicaoDestinoId,
-            InstituicaoDestino = destino!,
             CriadaEmUtc = DateTime.UtcNow,
             RevogadaEmUtc = null
         };
@@ -295,7 +284,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         context.AutorizacoesCompartilhamento.Add(autorizacao);
         await context.SaveChangesAsync();
 
-        return autorizacao.ToDto();
+        return await context.AutorizacoesCompartilhamento.Where(a => a.Id == autorizacao.Id).Select(Mapeamentos.Autorizacao).FirstAsync();
     }
 
     public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, UsuarioAtual solicitante)
@@ -330,15 +319,11 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
             throw new AcessoNegadoException("Acesso negado.");
         }
 
-        var autorizacoes = await context.AutorizacoesCompartilhamento
-            .Include(a => a.Paciente)
-            .Include(a => a.InstituicaoOrigem)
-            .Include(a => a.InstituicaoDestino)
+        return await context.AutorizacoesCompartilhamento
             .Where(a => a.PacienteId == pacienteId)
             .OrderByDescending(a => a.CriadaEmUtc)
+            .Select(Mapeamentos.Autorizacao)
             .ToListAsync();
-
-        return autorizacoes.Select(a => a.ToDto()).ToList();
     }
 
     private static NotificacaoSimulada ConvitePesquisa(Consulta consulta, CanalNotificacao canal, string titulo, string texto) => new()
