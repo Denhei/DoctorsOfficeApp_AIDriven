@@ -170,3 +170,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Exposto para o projeto de testes (WebApplicationFactory<Program>).
+public partial class Program { }
