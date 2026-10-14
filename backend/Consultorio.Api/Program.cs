@@ -74,7 +74,7 @@ builder.Services.AddScoped<IInstituicaoService, InstituicaoService>();
 builder.Services.AddScoped<IPacienteService, PacienteService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 
-// 6. Erros de regra e de autorização → HTTP, num único lugar
+// 6. Erros de regra e de autorização traduzidos para HTTP num único lugar
 builder.Services.AddExceptionHandler<TratadorGlobalDeExcecoes>();
 builder.Services.AddProblemDetails(); // fallback (500 em application/problem+json) para exceções não mapeadas
 

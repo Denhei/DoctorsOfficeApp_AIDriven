@@ -8,7 +8,7 @@ namespace Consultorio.Api.Data;
 public static class Usuarios
 {
     /// <summary>
-    /// Projeção única Usuario → UsuarioInfoDto. PacienteId e MedicoId são resolvidos no próprio SQL,
+    /// Projeção única de Usuario para UsuarioInfoDto. PacienteId e MedicoId são resolvidos no próprio SQL,
     /// o que elimina a consulta extra por usuário (N+1) que existia em cada chamador.
     /// </summary>
     public static IQueryable<UsuarioInfoDto> ProjetarInfo(this IQueryable<Usuario> usuarios, AppDbContext db) =>

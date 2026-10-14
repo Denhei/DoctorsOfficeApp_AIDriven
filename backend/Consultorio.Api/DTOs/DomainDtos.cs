@@ -2,8 +2,8 @@ using Consultorio.Api.Models.Enums;
 
 namespace Consultorio.Api.DTOs;
 
-// DTOs de entrada são records imutáveis (init) com os mesmos valores padrão de antes,
-// para que um campo ausente no JSON continue chegando como "" e não como null.
+// DTOs de entrada usam init e valor padrão explícito para que um campo ausente no JSON
+// chegue como "" e não como null.
 
 // --- Instituição & Médico ---
 public record InstituicaoDto(Guid Id, string Nome, string RazaoSocial, bool Ativa);
@@ -74,7 +74,7 @@ public record ConversaDetalheDto(
 
 public record ValidarColetaDto
 {
-    /// <summary>true → Validada (libera agendamento); false → EncaminhadaPresencial.</summary>
+    /// <summary>true leva a Validada (libera agendamento); false leva a EncaminhadaPresencial.</summary>
     public bool AprovadoParaAgendamento { get; init; }
     public string ResumoCorrigido { get; init; } = string.Empty;
     public string? ObservacaoEnfermeiro { get; init; }

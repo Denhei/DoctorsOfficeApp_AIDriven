@@ -3,7 +3,7 @@ using Consultorio.Api.Models.Entities;
 namespace Consultorio.Api.DTOs;
 
 /// <summary>
-/// Projeções entidade → DTO, uma por forma de resposta. As navegações lidas aqui precisam
+/// Projeções de entidade para DTO, uma por forma de resposta. As navegações lidas aqui precisam
 /// estar carregadas (Include) ou atribuídas pelo chamador ao construir a entidade.
 /// </summary>
 public static class Mapeamentos
