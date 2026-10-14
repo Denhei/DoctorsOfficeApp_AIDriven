@@ -1,5 +1,5 @@
-using System.Security.Claims;
 using Consultorio.Api.DTOs;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Enums;
 using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -11,28 +11,9 @@ namespace Consultorio.Api.Controllers;
 // (UnauthorizedAccessException) são traduzidas para HTTP por TratadorGlobalDeExcecoes.
 public abstract class ConsultorioControllerBase : ControllerBase
 {
-    protected Guid GetUserId()
-    {
-        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) 
-            ?? User.FindFirstValue("sub")
-            ?? User.FindFirstValue("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier");
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
+    private UsuarioAtual? _solicitante;
 
-    protected PerfilUsuario GetUserRole()
-    {
-        var claim = User.FindFirstValue(ClaimTypes.Role) 
-            ?? User.FindFirstValue("perfil")
-            ?? User.FindFirstValue("role")
-            ?? User.FindFirstValue("http://schemas.microsoft.com/ws/2008/06/identity/claims/role");
-        return Enum.TryParse<PerfilUsuario>(claim, out var role) ? role : PerfilUsuario.Paciente;
-    }
-
-    protected Guid? GetInstituicaoId()
-    {
-        var claim = User.FindFirstValue("instituicaoId");
-        return Guid.TryParse(claim, out var id) ? id : null;
-    }
+    protected UsuarioAtual Solicitante => _solicitante ??= UsuarioAtual.De(User);
 }
 
 // 1. Instituições & Médicos
@@ -73,35 +54,35 @@ public class PacientesController(IPacienteService pacienteService, IProntuarioSe
     [HttpGet("{id}")]
     public async Task<IActionResult> ObterPorId(Guid id)
     {
-        var res = await pacienteService.ObterPacientePorIdAsync(id, GetUserId(), GetUserRole());
+        var res = await pacienteService.ObterPacientePorIdAsync(id, Solicitante);
         return res != null ? Ok(res) : NotFound();
     }
 
     [HttpPatch("{id}")]
     public async Task<IActionResult> Atualizar(Guid id, [FromBody] AtualizarPacienteDto dto)
-        => Ok(await pacienteService.AtualizarPacienteAsync(id, dto, GetUserId(), GetUserRole()));
+        => Ok(await pacienteService.AtualizarPacienteAsync(id, dto, Solicitante));
 
     [HttpGet("{id}/historico")]
     public async Task<IActionResult> ObterHistorico(Guid id)
-        => Ok(await prontuarioService.ObterHistoricoPacienteAsync(id, GetUserId(), GetUserRole()));
+        => Ok(await prontuarioService.ObterHistoricoPacienteAsync(id, Solicitante));
 
     [HttpPost("{id}/documentos")]
     public async Task<IActionResult> AnexarDocumento(Guid id, [FromQuery] Guid instituicaoOrigemId, IFormFile arquivo)
-        => Ok(await prontuarioService.AnexarDocumentoAsync(id, instituicaoOrigemId, arquivo, GetUserId(), GetUserRole()));
+        => Ok(await prontuarioService.AnexarDocumentoAsync(id, instituicaoOrigemId, arquivo, Solicitante));
 
     [HttpGet("{id}/documentos")]
     public async Task<IActionResult> ListarDocumentos(Guid id)
-        => Ok(await prontuarioService.ListarDocumentosAsync(id, GetUserId(), GetUserRole()));
+        => Ok(await prontuarioService.ListarDocumentosAsync(id, Solicitante));
 
     [HttpGet("{id}/autorizacoes")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> ListarAutorizacoes(Guid id)
-        => Ok(await prontuarioService.ListarAutorizacoesAsync(id, GetUserId()));
+        => Ok(await prontuarioService.ListarAutorizacoesAsync(id, Solicitante));
 
     [HttpPost("{id}/autorizacoes")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> ConcederAutorizacao(Guid id, [FromBody] CriarAutorizacaoDto dto)
-        => Ok(await prontuarioService.ConcederAutorizacaoAsync(id, dto, GetUserId()));
+        => Ok(await prontuarioService.ConcederAutorizacaoAsync(id, dto, Solicitante));
 }
 
 // 3. Coletas & Chatbot Guiado
@@ -114,50 +95,48 @@ public class ColetasController(ITriagemChatService chatService) : ConsultorioCon
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> Iniciar([FromBody] IniciarColetaDto dto)
     {
-        var pacClaim = User.FindFirstValue("pacienteId");
-        if (string.IsNullOrEmpty(pacClaim) || !Guid.TryParse(pacClaim, out var pacId))
+        if (Solicitante.PacienteId is not { } pacienteId)
         {
             return Unauthorized();
         }
 
-        return Ok(await chatService.IniciarColetaAsync(pacId, dto.InstituicaoId));
+        return Ok(await chatService.IniciarColetaAsync(pacienteId, dto.InstituicaoId));
     }
 
     [HttpGet]
     [Authorize(Roles = "Enfermeiro,Admin")]
     public async Task<IActionResult> ListarFila([FromQuery] string? status)
     {
-        var instId = GetInstituicaoId();
-        if (!instId.HasValue && GetUserRole() != PerfilUsuario.Admin)
+        if (Solicitante.InstituicaoId is null && Solicitante.Perfil != PerfilUsuario.Admin)
         {
             return Forbid();
         }
 
-        return Ok(await chatService.ListarFilaEnfermeiroAsync(instId ?? Guid.Empty));
+        return Ok(await chatService.ListarFilaEnfermeiroAsync(Solicitante.InstituicaoId ?? Guid.Empty));
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> ObterPorId(Guid id)
     {
-        var res = await chatService.ObterConversaPorColetaIdAsync(id, GetUserId(), GetUserRole());
+        var res = await chatService.ObterConversaPorColetaIdAsync(id, Solicitante);
         return res != null ? Ok(res) : NotFound();
     }
 
     [HttpPost("{id}/mensagens")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> EnviarMensagem(Guid id, [FromBody] EnviarMensagemChatDto dto)
-        => Ok(await chatService.ProcessarMensagemAsync(id, GetUserId(), dto));
+        => Ok(await chatService.ProcessarMensagemAsync(id, Solicitante, dto));
 
     [HttpPost("{id}/finalizacao")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> Finalizar(Guid id)
-        => Ok(await chatService.FinalizarEnvioEnfermeiroAsync(id, GetUserId()));
+        => Ok(await chatService.FinalizarEnvioEnfermeiroAsync(id, Solicitante));
 
     [HttpPut("{id}/validacao")]
     [Authorize(Roles = "Enfermeiro")]
     public async Task<IActionResult> Validar(Guid id, [FromBody] ValidarColetaDto dto)
     {
-        var sucesso = await chatService.ValidarColetaAsync(id, GetUserId(), dto);
+        var sucesso = await chatService.ValidarColetaAsync(id, Solicitante, dto);
         if (!sucesso)
         {
             return BadRequest(new { mensagem = "Coleta não encontrada ou já validada." });
@@ -180,7 +159,7 @@ public class SlotsController(IAgendaService agendaService) : ConsultorioControll
     [HttpPost]
     [Authorize(Roles = "Atendente,Admin")]
     public async Task<IActionResult> Criar([FromBody] CriarSlotDto dto)
-        => Ok(await agendaService.CriarSlotAsync(dto, GetInstituicaoId() ?? dto.InstituicaoId));
+        => Ok(await agendaService.CriarSlotAsync(dto, Solicitante.InstituicaoId ?? dto.InstituicaoId));
 }
 
 // 5. Consultas
@@ -194,48 +173,48 @@ public class ConsultasController(
 {
     [HttpGet]
     public async Task<IActionResult> Listar([FromQuery] Guid? instituicaoId, [FromQuery] Guid? pacienteId)
-        => Ok(await agendaService.ListarConsultasAsync(GetUserId(), GetUserRole(), instituicaoId, pacienteId));
+        => Ok(await agendaService.ListarConsultasAsync(Solicitante, instituicaoId, pacienteId));
 
     [HttpGet("{id}")]
     public async Task<IActionResult> ObterPorId(Guid id)
     {
-        var res = await agendaService.ObterConsultaPorIdAsync(id, GetUserId(), GetUserRole());
+        var res = await agendaService.ObterConsultaPorIdAsync(id, Solicitante);
         return res != null ? Ok(res) : NotFound();
     }
 
     [HttpPost]
     public async Task<IActionResult> Agendar([FromBody] AgendarConsultaDto dto)
-        => Ok(await agendaService.AgendarConsultaAsync(dto, GetUserId(), GetUserRole()));
+        => Ok(await agendaService.AgendarConsultaAsync(dto, Solicitante));
 
     [HttpPatch("{id}/status")]
     public async Task<IActionResult> AtualizarStatus(Guid id, [FromBody] AtualizarStatusConsultaDto dto)
     {
-        var ok = await agendaService.AtualizarStatusConsultaAsync(id, dto.NovoStatus, GetUserId(), GetUserRole());
+        var ok = await agendaService.AtualizarStatusConsultaAsync(id, dto.NovoStatus, Solicitante);
         return ok ? Ok(new { mensagem = "Status atualizado com sucesso." }) : BadRequest();
     }
 
     [HttpPut("{id}/evolucao")]
     [Authorize(Roles = "Medico")]
     public async Task<IActionResult> RegistrarEvolucao(Guid id, [FromBody] RegistrarEvolucaoDto dto)
-        => Ok(await prontuarioService.RegistrarEvolucaoAsync(id, GetUserId(), dto));
+        => Ok(await prontuarioService.RegistrarEvolucaoAsync(id, Solicitante, dto));
 
     [HttpPost("{id}/conclusao")]
     [Authorize(Roles = "Medico")]
     public async Task<IActionResult> Concluir(Guid id)
-        => Ok(await prontuarioService.ConcluirConsultaAsync(id, GetUserId()));
+        => Ok(await prontuarioService.ConcluirConsultaAsync(id, Solicitante));
 
     [HttpGet("{id}/pesquisa")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> ObterPesquisa(Guid id)
     {
-        var res = await pesquisaService.ObterPesquisaConsultaAsync(id, GetUserId());
+        var res = await pesquisaService.ObterPesquisaConsultaAsync(id, Solicitante);
         return res != null ? Ok(res) : NotFound();
     }
 
     [HttpPut("{id}/pesquisa")]
     [Authorize(Roles = "Paciente")]
     public async Task<IActionResult> ResponderPesquisa(Guid id, [FromBody] ResponderPesquisaDto dto)
-        => Ok(await pesquisaService.ResponderPesquisaAsync(id, dto, GetUserId()));
+        => Ok(await pesquisaService.ResponderPesquisaAsync(id, dto, Solicitante));
 }
 
 // 6. Documentos & Downloads
@@ -247,7 +226,7 @@ public class DocumentosController(IProntuarioService prontuarioService) : Consul
     [HttpGet("{id}/arquivo")]
     public async Task<IActionResult> BaixarArquivo(Guid id)
     {
-        var res = await prontuarioService.ObterArquivoParaDownloadAsync(id, GetUserId(), GetUserRole());
+        var res = await prontuarioService.ObterArquivoParaDownloadAsync(id, Solicitante);
         if (res == null) return NotFound();
 
         return File(res.Value.Bytes, res.Value.ContentType, res.Value.NomeArquivo);
@@ -263,7 +242,7 @@ public class AutorizacoesController(IProntuarioService prontuarioService) : Cons
     [HttpDelete("{id}")]
     public async Task<IActionResult> Revogar(Guid id)
     {
-        var ok = await prontuarioService.RevogarAutorizacaoAsync(id, GetUserId());
+        var ok = await prontuarioService.RevogarAutorizacaoAsync(id, Solicitante);
         return ok ? Ok(new { mensagem = "Autorização revogada com sucesso." }) : NotFound();
     }
 }
@@ -275,7 +254,7 @@ public class AutorizacoesController(IProntuarioService prontuarioService) : Cons
 public class NotificacoesController(INotificacaoPesquisaService service) : ConsultorioControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Listar() => Ok(await service.ListarNotificacoesPacienteAsync(GetUserId()));
+    public async Task<IActionResult> Listar() => Ok(await service.ListarNotificacoesPacienteAsync(Solicitante));
 }
 
 // 9. Dashboard Operacional
@@ -285,7 +264,7 @@ public class NotificacoesController(INotificacaoPesquisaService service) : Consu
 public class DashboardController(IDashboardService service) : ConsultorioControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Obter() => Ok(await service.ObterDashboardOperacionalAsync(GetInstituicaoId()));
+    public async Task<IActionResult> Obter() => Ok(await service.ObterDashboardOperacionalAsync(Solicitante.InstituicaoId));
 }
 
 // 10. Admin

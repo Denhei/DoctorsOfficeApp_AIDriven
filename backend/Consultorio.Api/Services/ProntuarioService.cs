@@ -10,15 +10,15 @@ namespace Consultorio.Api.Services;
 
 public interface IProntuarioService
 {
-    Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, Guid medicoUsuarioId, RegistrarEvolucaoDto dto);
-    Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, Guid medicoUsuarioId);
-    Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, Guid pacienteUsuarioId);
-    Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, Guid pacienteUsuarioId);
-    Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId);
+    Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, UsuarioAtual medico, RegistrarEvolucaoDto dto);
+    Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, UsuarioAtual medico);
+    Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, UsuarioAtual solicitante);
+    Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, UsuarioAtual solicitante);
+    Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, UsuarioAtual solicitante);
+    Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, UsuarioAtual solicitante);
+    Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, UsuarioAtual solicitante);
+    Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, UsuarioAtual solicitante);
+    Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, UsuarioAtual solicitante);
 }
 
 public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arquivos) : IProntuarioService
@@ -26,9 +26,9 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
     private const long TamanhoMaximoBytes = 5 * 1024 * 1024;
     private static readonly string[] ExtensoesPermitidas = [".pdf", ".jpg", ".jpeg", ".png"];
 
-    public async Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, Guid medicoUsuarioId, RegistrarEvolucaoDto dto)
+    public async Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, UsuarioAtual medico, RegistrarEvolucaoDto dto)
     {
-        var medico = await MedicoDoUsuarioAsync(medicoUsuarioId, "Usuário não é um médico cadastrado.");
+        var medicoId = medico.MedicoId ?? throw new UnauthorizedAccessException("Usuário não é um médico cadastrado.");
 
         var consulta = await context.Consultas
             .Include(c => c.Slot)
@@ -36,7 +36,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
             .FirstOrDefaultAsync(c => c.Id == consultaId)
             ?? throw new InvalidOperationException("Consulta não encontrada.");
 
-        if (consulta.Slot.MedicoId != medico.Id)
+        if (consulta.Slot.MedicoId != medicoId)
         {
             throw new UnauthorizedAccessException("Apenas o médico responsável por esta consulta pode registrar a evolução.");
         }
@@ -48,7 +48,8 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         if (consulta.Evolucao == null)
         {
-            consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medico.Id, Medico = medico };
+            var autor = await context.Medicos.Include(m => m.Usuario).FirstAsync(m => m.Id == medicoId);
+            consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medicoId, Medico = autor };
             context.Evolucoes.Add(consulta.Evolucao);
         }
 
@@ -60,16 +61,16 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return consulta.Evolucao.ToDto();
     }
 
-    public async Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, Guid medicoUsuarioId)
+    public async Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, UsuarioAtual medico)
     {
-        var medico = await MedicoDoUsuarioAsync(medicoUsuarioId, "Usuário não é um médico.");
+        var medicoId = medico.MedicoId ?? throw new UnauthorizedAccessException("Usuário não é um médico.");
 
         using var transaction = await context.Database.BeginTransactionAsync();
 
         var consulta = await context.Consultas.ComDetalhes().FirstOrDefaultAsync(c => c.Id == consultaId)
             ?? throw new InvalidOperationException("Consulta não encontrada.");
 
-        if (consulta.Slot.MedicoId != medico.Id)
+        if (consulta.Slot.MedicoId != medicoId)
         {
             throw new UnauthorizedAccessException("Apenas o médico responsável pode concluir o atendimento.");
         }
@@ -104,9 +105,9 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return consulta.ToDto();
     }
 
-    public async Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
-        if (perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
+        if (solicitante.Perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
         {
             throw new UnauthorizedAccessException("Atendentes e Administradores Técnicos não possuem permissão de acesso ao histórico clínico.");
         }
@@ -124,10 +125,10 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         // Consultas e documentos são filtrados pela instituição de origem que o solicitante pode ver.
         Func<Guid, bool> podeVerOrigem;
-        switch (perfil)
+        switch (solicitante.Perfil)
         {
             case PerfilUsuario.Paciente:
-                if (paciente.UsuarioId != solicitanteUsuarioId)
+                if (paciente.UsuarioId != solicitante.Id)
                 {
                     throw new UnauthorizedAccessException("Você não tem permissão para acessar o histórico de outro paciente.");
                 }
@@ -135,7 +136,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
                 break;
 
             case PerfilUsuario.Medico:
-                var medico = await MedicoDoUsuarioAsync(solicitanteUsuarioId, "Médico não encontrado.");
+                var medico = await MedicoDeAsync(solicitante);
                 var temConsultaVinculada = await context.Consultas
                     .AnyAsync(c => c.PacienteId == pacienteId && c.Slot.MedicoId == medico.Id);
                 if (!temConsultaVinculada)
@@ -165,9 +166,9 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         );
     }
 
-    public async Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, UsuarioAtual solicitante)
     {
-        if (perfil is not (PerfilUsuario.Paciente or PerfilUsuario.Medico))
+        if (solicitante.Perfil is not (PerfilUsuario.Paciente or PerfilUsuario.Medico))
         {
             throw new UnauthorizedAccessException("Apenas o próprio paciente ou seu médico podem anexar documentos.");
         }
@@ -175,7 +176,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
-        if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado.");
         }
@@ -215,15 +216,15 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return documento.ToDto();
     }
 
-    public async Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
-        var historico = await ObterHistoricoPacienteAsync(pacienteId, solicitanteUsuarioId, perfil);
+        var historico = await ObterHistoricoPacienteAsync(pacienteId, solicitante);
         return historico.Documentos;
     }
 
-    public async Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, UsuarioAtual solicitante)
     {
-        if (perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
+        if (solicitante.Perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
         {
             throw new UnauthorizedAccessException("Atendentes e Administradores não possuem permissão para download de arquivos clínicos.");
         }
@@ -234,14 +235,14 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         if (documento == null) return null;
 
-        if (perfil == PerfilUsuario.Paciente && documento.Paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && documento.Paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado.");
         }
 
-        if (perfil == PerfilUsuario.Medico)
+        if (solicitante.Perfil == PerfilUsuario.Medico)
         {
-            var medico = await MedicoDoUsuarioAsync(solicitanteUsuarioId, "Médico não encontrado.");
+            var medico = await MedicoDeAsync(solicitante);
 
             var temConsulta = await context.Consultas.AnyAsync(c => c.PacienteId == documento.PacienteId && c.Slot.MedicoId == medico.Id);
             if (!temConsulta) throw new UnauthorizedAccessException("Acesso negado.");
@@ -260,12 +261,12 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return (bytes, documento.Tipo, documento.NomeOriginal);
     }
 
-    public async Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, Guid pacienteUsuarioId)
+    public async Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, UsuarioAtual solicitante)
     {
         var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
-        if (paciente.UsuarioId != pacienteUsuarioId)
+        if (paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Apenas o próprio paciente pode conceder autorizações de compartilhamento.");
         }
@@ -296,7 +297,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return autorizacao.ToDto();
     }
 
-    public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, Guid pacienteUsuarioId)
+    public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, UsuarioAtual solicitante)
     {
         var autorizacao = await context.AutorizacoesCompartilhamento
             .Include(a => a.Paciente)
@@ -304,7 +305,7 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
 
         if (autorizacao == null) return false;
 
-        if (autorizacao.Paciente.UsuarioId != pacienteUsuarioId)
+        if (autorizacao.Paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Você só pode revogar autorizações do seu próprio cadastro.");
         }
@@ -318,12 +319,12 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         return true;
     }
 
-    public async Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId)
+    public async Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
         var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
-        if (paciente.UsuarioId != pacienteUsuarioId)
+        if (paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado.");
         }
@@ -350,7 +351,8 @@ public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arqui
         CriadaEmUtc = DateTime.UtcNow
     };
 
-    private async Task<Medico> MedicoDoUsuarioAsync(Guid usuarioId, string mensagemSeAusente)
-        => await context.Medicos.Include(m => m.Usuario).FirstOrDefaultAsync(m => m.UsuarioId == usuarioId)
-           ?? throw new UnauthorizedAccessException(mensagemSeAusente);
+    /// <summary>Registro de Medico do solicitante, para regras que dependem da instituição dele.</summary>
+    private async Task<Medico> MedicoDeAsync(UsuarioAtual solicitante)
+        => await context.Medicos.FindAsync(solicitante.MedicoId)
+           ?? throw new UnauthorizedAccessException("Médico não encontrado.");
 }

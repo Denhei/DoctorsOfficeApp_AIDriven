@@ -1,5 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -10,10 +11,10 @@ public interface IAgendaService
 {
     Task<List<SlotAgendaDto>> ListarSlotsAsync(Guid? medicoId, Guid? instituicaoId, DateTime? data);
     Task<SlotAgendaDto> CriarSlotAsync(CriarSlotDto dto, Guid instituicaoId);
-    Task<ConsultaDto> AgendarConsultaAsync(AgendarConsultaDto dto, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<List<ConsultaDto>> ListarConsultasAsync(Guid solicitanteUsuarioId, PerfilUsuario perfil, Guid? instituicaoId, Guid? pacienteId);
-    Task<ConsultaDto?> ObterConsultaPorIdAsync(Guid consultaId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<bool> AtualizarStatusConsultaAsync(Guid consultaId, StatusConsulta novoStatus, Guid solicitanteUsuarioId, PerfilUsuario perfil);
+    Task<ConsultaDto> AgendarConsultaAsync(AgendarConsultaDto dto, UsuarioAtual solicitante);
+    Task<List<ConsultaDto>> ListarConsultasAsync(UsuarioAtual solicitante, Guid? instituicaoId, Guid? pacienteId);
+    Task<ConsultaDto?> ObterConsultaPorIdAsync(Guid consultaId, UsuarioAtual solicitante);
+    Task<bool> AtualizarStatusConsultaAsync(Guid consultaId, StatusConsulta novoStatus, UsuarioAtual solicitante);
 }
 
 public class AgendaService(AppDbContext context) : IAgendaService
@@ -87,7 +88,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
         return slot.ToDto(disponivel: true);
     }
 
-    public async Task<ConsultaDto> AgendarConsultaAsync(AgendarConsultaDto dto, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<ConsultaDto> AgendarConsultaAsync(AgendarConsultaDto dto, UsuarioAtual solicitante)
     {
         // Transação com lock na linha do paciente: evita dupla reserva do slot e sobreposição de horário do paciente.
         using var transaction = await context.Database.BeginTransactionAsync();
@@ -97,7 +98,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
             .FirstOrDefaultAsync()
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
-        if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Você só pode agendar consultas para seu próprio cadastro.");
         }
@@ -164,40 +165,37 @@ public class AgendaService(AppDbContext context) : IAgendaService
         return consulta.ToDto();
     }
 
-    public async Task<List<ConsultaDto>> ListarConsultasAsync(Guid solicitanteUsuarioId, PerfilUsuario perfil, Guid? instituicaoId, Guid? pacienteId)
+    public async Task<List<ConsultaDto>> ListarConsultasAsync(UsuarioAtual solicitante, Guid? instituicaoId, Guid? pacienteId)
     {
         var query = context.Consultas.ComDetalhes();
 
-        switch (perfil)
+        switch (solicitante.Perfil)
         {
             case PerfilUsuario.Paciente:
-                var pac = await context.Pacientes.FirstOrDefaultAsync(p => p.UsuarioId == solicitanteUsuarioId);
-                if (pac == null) return [];
-                query = query.Where(c => c.PacienteId == pac.Id);
+                if (solicitante.PacienteId is not { } pacId) return [];
+                query = query.Where(c => c.PacienteId == pacId);
                 break;
 
             case PerfilUsuario.Medico:
-                var med = await context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == solicitanteUsuarioId);
-                if (med == null) return [];
-                query = query.Where(c => c.Slot.MedicoId == med.Id);
+                if (solicitante.MedicoId is not { } medId) return [];
+                query = query.Where(c => c.Slot.MedicoId == medId);
                 break;
 
             case PerfilUsuario.Atendente:
             case PerfilUsuario.Enfermeiro:
-                var user = await context.Users.FindAsync(solicitanteUsuarioId);
-                if (user?.InstituicaoId != null)
+                if (solicitante.InstituicaoId is { } instId)
                 {
-                    query = query.Where(c => c.Slot.InstituicaoId == user.InstituicaoId.Value);
+                    query = query.Where(c => c.Slot.InstituicaoId == instId);
                 }
                 break;
         }
 
-        if (instituicaoId.HasValue && perfil == PerfilUsuario.Admin)
+        if (instituicaoId.HasValue && solicitante.Perfil == PerfilUsuario.Admin)
         {
             query = query.Where(c => c.Slot.InstituicaoId == instituicaoId.Value);
         }
 
-        if (pacienteId.HasValue && perfil != PerfilUsuario.Paciente)
+        if (pacienteId.HasValue && solicitante.Perfil != PerfilUsuario.Paciente)
         {
             query = query.Where(c => c.PacienteId == pacienteId.Value);
         }
@@ -207,28 +205,27 @@ public class AgendaService(AppDbContext context) : IAgendaService
         return consultas.Select(c => c.ToDto()).ToList();
     }
 
-    public async Task<ConsultaDto?> ObterConsultaPorIdAsync(Guid consultaId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<ConsultaDto?> ObterConsultaPorIdAsync(Guid consultaId, UsuarioAtual solicitante)
     {
         var consulta = await context.Consultas.ComDetalhes().FirstOrDefaultAsync(c => c.Id == consultaId);
 
         if (consulta == null) return null;
 
-        if (perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado.");
         }
 
-        if (perfil == PerfilUsuario.Medico && consulta.Slot.Medico.UsuarioId != solicitanteUsuarioId)
+        // Qualquer médico cadastrado pode ler a consulta; só é negado o perfil Medico sem registro de Medico.
+        if (solicitante.Perfil == PerfilUsuario.Medico && solicitante.MedicoId is null)
         {
-            // Qualquer médico cadastrado pode ler a consulta; só é negado o perfil Medico sem registro de Medico.
-            var med = await context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == solicitanteUsuarioId);
-            if (med == null) throw new UnauthorizedAccessException("Acesso negado.");
+            throw new UnauthorizedAccessException("Acesso negado.");
         }
 
         return consulta.ToDto();
     }
 
-    public async Task<bool> AtualizarStatusConsultaAsync(Guid consultaId, StatusConsulta novoStatus, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<bool> AtualizarStatusConsultaAsync(Guid consultaId, StatusConsulta novoStatus, UsuarioAtual solicitante)
     {
         var consulta = await context.Consultas
             .Include(c => c.Paciente)
@@ -240,7 +237,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
         switch (novoStatus)
         {
             case StatusConsulta.Cancelada:
-                if (perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitanteUsuarioId)
+                if (solicitante.Perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitante.Id)
                     throw new UnauthorizedAccessException("Acesso negado.");
 
                 if (consulta.Status == StatusConsulta.Concluida)
@@ -248,7 +245,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
                 break;
 
             case StatusConsulta.EmAtendimento:
-                if (perfil != PerfilUsuario.Medico || consulta.Slot.Medico.UsuarioId != solicitanteUsuarioId)
+                if (solicitante.Perfil != PerfilUsuario.Medico || consulta.Slot.Medico.UsuarioId != solicitante.Id)
                     throw new UnauthorizedAccessException("Apenas o médico responsável pode iniciar o atendimento.");
                 break;
 

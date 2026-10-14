@@ -1,5 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Microsoft.AspNetCore.Identity;
@@ -10,43 +11,43 @@ namespace Consultorio.Api.Services;
 // --- Notificações Simuladas & Pesquisa de Satisfação ---
 public interface INotificacaoPesquisaService
 {
-    Task<List<NotificacaoDto>> ListarNotificacoesPacienteAsync(Guid pacienteUsuarioId);
-    Task<PesquisaSatisfacaoDto?> ObterPesquisaConsultaAsync(Guid consultaId, Guid pacienteUsuarioId);
-    Task<PesquisaSatisfacaoDto> ResponderPesquisaAsync(Guid consultaId, ResponderPesquisaDto dto, Guid pacienteUsuarioId);
+    Task<List<NotificacaoDto>> ListarNotificacoesPacienteAsync(UsuarioAtual paciente);
+    Task<PesquisaSatisfacaoDto?> ObterPesquisaConsultaAsync(Guid consultaId, UsuarioAtual paciente);
+    Task<PesquisaSatisfacaoDto> ResponderPesquisaAsync(Guid consultaId, ResponderPesquisaDto dto, UsuarioAtual paciente);
 }
 
 public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesquisaService
 {
-    public async Task<List<NotificacaoDto>> ListarNotificacoesPacienteAsync(Guid pacienteUsuarioId)
+    public async Task<List<NotificacaoDto>> ListarNotificacoesPacienteAsync(UsuarioAtual paciente)
     {
-        var paciente = await PacienteDoUsuarioAsync(pacienteUsuarioId);
+        var pacienteId = PacienteIdDe(paciente);
 
         var notificacoes = await context.NotificacoesSimuladas
-            .Where(n => n.PacienteId == paciente.Id)
+            .Where(n => n.PacienteId == pacienteId)
             .OrderByDescending(n => n.CriadaEmUtc)
             .ToListAsync();
 
         return notificacoes.Select(n => n.ToDto()).ToList();
     }
 
-    public async Task<PesquisaSatisfacaoDto?> ObterPesquisaConsultaAsync(Guid consultaId, Guid pacienteUsuarioId)
+    public async Task<PesquisaSatisfacaoDto?> ObterPesquisaConsultaAsync(Guid consultaId, UsuarioAtual paciente)
     {
-        var paciente = await PacienteDoUsuarioAsync(pacienteUsuarioId);
+        var pacienteId = PacienteIdDe(paciente);
 
         var consulta = await context.Consultas
             .Include(c => c.PesquisaSatisfacao)
-            .FirstOrDefaultAsync(c => c.Id == consultaId && c.PacienteId == paciente.Id);
+            .FirstOrDefaultAsync(c => c.Id == consultaId && c.PacienteId == pacienteId);
 
         return consulta?.PesquisaSatisfacao?.ToDto();
     }
 
-    public async Task<PesquisaSatisfacaoDto> ResponderPesquisaAsync(Guid consultaId, ResponderPesquisaDto dto, Guid pacienteUsuarioId)
+    public async Task<PesquisaSatisfacaoDto> ResponderPesquisaAsync(Guid consultaId, ResponderPesquisaDto dto, UsuarioAtual paciente)
     {
-        var paciente = await PacienteDoUsuarioAsync(pacienteUsuarioId);
+        var pacienteId = PacienteIdDe(paciente);
 
         var consulta = await context.Consultas
             .Include(c => c.PesquisaSatisfacao)
-            .FirstOrDefaultAsync(c => c.Id == consultaId && c.PacienteId == paciente.Id)
+            .FirstOrDefaultAsync(c => c.Id == consultaId && c.PacienteId == pacienteId)
             ?? throw new InvalidOperationException("Consulta não encontrada.");
 
         if (consulta.Status != StatusConsulta.Concluida)
@@ -67,7 +68,7 @@ public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesq
         var pesquisa = new PesquisaSatisfacao
         {
             ConsultaId = consultaId,
-            PacienteId = paciente.Id,
+            PacienteId = pacienteId,
             Nota = dto.Nota,
             Percepcao = dto.Percepcao,
             Comentario = dto.Comentario,
@@ -80,9 +81,8 @@ public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesq
         return pesquisa.ToDto();
     }
 
-    private async Task<Paciente> PacienteDoUsuarioAsync(Guid usuarioId)
-        => await context.Pacientes.FirstOrDefaultAsync(p => p.UsuarioId == usuarioId)
-           ?? throw new UnauthorizedAccessException("Paciente não encontrado.");
+    private static Guid PacienteIdDe(UsuarioAtual usuario)
+        => usuario.PacienteId ?? throw new UnauthorizedAccessException("Paciente não encontrado.");
 }
 
 // --- Dashboard Operacional ---
@@ -168,9 +168,9 @@ public class InstituicaoService(AppDbContext context) : IInstituicaoService
 public interface IPacienteService
 {
     Task<List<PacienteDto>> ListarPacientesAsync();
-    Task<PacienteDto?> ObterPacientePorIdAsync(Guid id, Guid solicitanteUsuarioId, PerfilUsuario perfil);
+    Task<PacienteDto?> ObterPacientePorIdAsync(Guid id, UsuarioAtual solicitante);
     Task<PacienteDto> CriarPacienteAsync(CriarPacienteDto dto);
-    Task<PacienteDto> AtualizarPacienteAsync(Guid id, AtualizarPacienteDto dto, Guid solicitanteUsuarioId, PerfilUsuario perfil);
+    Task<PacienteDto> AtualizarPacienteAsync(Guid id, AtualizarPacienteDto dto, UsuarioAtual solicitante);
 }
 
 public class PacienteService(AppDbContext context, UserManager<Usuario> userManager) : IPacienteService
@@ -181,12 +181,12 @@ public class PacienteService(AppDbContext context, UserManager<Usuario> userMana
         return pacientes.Select(p => p.ToDto()).ToList();
     }
 
-    public async Task<PacienteDto?> ObterPacientePorIdAsync(Guid id, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<PacienteDto?> ObterPacientePorIdAsync(Guid id, UsuarioAtual solicitante)
     {
         var paciente = await context.Pacientes.FindAsync(id);
         if (paciente == null) return null;
 
-        if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado aos dados de outro paciente.");
         }
@@ -214,12 +214,12 @@ public class PacienteService(AppDbContext context, UserManager<Usuario> userMana
         return paciente.ToDto();
     }
 
-    public async Task<PacienteDto> AtualizarPacienteAsync(Guid id, AtualizarPacienteDto dto, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<PacienteDto> AtualizarPacienteAsync(Guid id, AtualizarPacienteDto dto, UsuarioAtual solicitante)
     {
         var paciente = await context.Pacientes.FindAsync(id)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
-        if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado.");
         }

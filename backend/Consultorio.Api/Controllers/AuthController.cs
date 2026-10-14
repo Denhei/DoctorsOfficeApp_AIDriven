@@ -36,13 +36,7 @@ public class AuthController(IAuthService authService) : ConsultorioControllerBas
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Me()
     {
-        var userId = GetUserId();
-        if (userId == Guid.Empty)
-        {
-            return Unauthorized();
-        }
-
-        var userInfo = await authService.ObterUsuarioAtualAsync(userId);
+        var userInfo = await authService.ObterUsuarioAtualAsync(Solicitante.Id);
         if (userInfo == null)
         {
             return NotFound(new { mensagem = "Usuário não encontrado." });

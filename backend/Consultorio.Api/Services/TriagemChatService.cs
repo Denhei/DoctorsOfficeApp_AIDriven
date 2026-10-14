@@ -1,5 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Consultorio.Api.Models.Mongo;
@@ -11,11 +12,11 @@ namespace Consultorio.Api.Services;
 public interface ITriagemChatService
 {
     Task<ConversaDetalheDto> IniciarColetaAsync(Guid pacienteId, Guid instituicaoId);
-    Task<ConversaDetalheDto?> ObterConversaPorColetaIdAsync(Guid coletaId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<ConversaDetalheDto> ProcessarMensagemAsync(Guid coletaId, Guid pacienteUsuarioId, EnviarMensagemChatDto dto);
-    Task<ConversaDetalheDto> FinalizarEnvioEnfermeiroAsync(Guid coletaId, Guid pacienteUsuarioId);
+    Task<ConversaDetalheDto?> ObterConversaPorColetaIdAsync(Guid coletaId, UsuarioAtual solicitante);
+    Task<ConversaDetalheDto> ProcessarMensagemAsync(Guid coletaId, UsuarioAtual solicitante, EnviarMensagemChatDto dto);
+    Task<ConversaDetalheDto> FinalizarEnvioEnfermeiroAsync(Guid coletaId, UsuarioAtual solicitante);
     Task<List<ColetaItemFilaDto>> ListarFilaEnfermeiroAsync(Guid enfermeiroInstituicaoId);
-    Task<bool> ValidarColetaAsync(Guid coletaId, Guid enfermeiroUsuarioId, ValidarColetaDto dto);
+    Task<bool> ValidarColetaAsync(Guid coletaId, UsuarioAtual enfermeiro, ValidarColetaDto dto);
 }
 
 public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : ITriagemChatService
@@ -57,7 +58,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         return MapearDetalheDto(coleta, conversa);
     }
 
-    public async Task<ConversaDetalheDto?> ObterConversaPorColetaIdAsync(Guid coletaId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<ConversaDetalheDto?> ObterConversaPorColetaIdAsync(Guid coletaId, UsuarioAtual solicitante)
     {
         var coleta = await context.ColetasIniciais
             .Include(c => c.Paciente)
@@ -66,7 +67,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
 
         if (coleta == null) return null;
 
-        if (perfil == PerfilUsuario.Paciente && coleta.Paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && coleta.Paciente.UsuarioId != solicitante.Id)
         {
             throw new UnauthorizedAccessException("Acesso negado aos dados de outro paciente.");
         }
@@ -77,9 +78,9 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         return MapearDetalheDto(coleta, conversa);
     }
 
-    public async Task<ConversaDetalheDto> ProcessarMensagemAsync(Guid coletaId, Guid pacienteUsuarioId, EnviarMensagemChatDto dto)
+    public async Task<ConversaDetalheDto> ProcessarMensagemAsync(Guid coletaId, UsuarioAtual solicitante, EnviarMensagemChatDto dto)
     {
-        var coleta = await ColetaDoPacienteAsync(coletaId, pacienteUsuarioId);
+        var coleta = await ColetaDoPacienteAsync(coletaId, solicitante.Id);
 
         if (coleta.Status != StatusColeta.EmColeta)
         {
@@ -114,9 +115,9 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         return MapearDetalheDto(coleta, conversa);
     }
 
-    public async Task<ConversaDetalheDto> FinalizarEnvioEnfermeiroAsync(Guid coletaId, Guid pacienteUsuarioId)
+    public async Task<ConversaDetalheDto> FinalizarEnvioEnfermeiroAsync(Guid coletaId, UsuarioAtual solicitante)
     {
-        var coleta = await ColetaDoPacienteAsync(coletaId, pacienteUsuarioId);
+        var coleta = await ColetaDoPacienteAsync(coletaId, solicitante.Id);
 
         var conversa = await ConversaAsync(coleta.ConversaId)
             ?? throw new InvalidOperationException("Conversa não encontrada.");
@@ -155,7 +156,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         )).ToList();
     }
 
-    public async Task<bool> ValidarColetaAsync(Guid coletaId, Guid enfermeiroUsuarioId, ValidarColetaDto dto)
+    public async Task<bool> ValidarColetaAsync(Guid coletaId, UsuarioAtual enfermeiro, ValidarColetaDto dto)
     {
         var coleta = await context.ColetasIniciais.FindAsync(coletaId);
 
@@ -164,7 +165,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
             return false;
         }
 
-        coleta.EnfermeiroId = enfermeiroUsuarioId;
+        coleta.EnfermeiroId = enfermeiro.Id;
         coleta.ValidadoEmUtc = DateTime.UtcNow;
         coleta.ResumoValidado = dto.ResumoCorrigido;
         coleta.Status = dto.AprovadoParaAgendamento ? StatusColeta.Validada : StatusColeta.EncaminhadaPresencial;
