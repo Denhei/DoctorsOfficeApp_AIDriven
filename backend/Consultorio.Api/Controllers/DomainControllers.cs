@@ -193,8 +193,8 @@ public class ConsultasController(
     INotificacaoPesquisaService pesquisaService) : ConsultorioControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Listar([FromQuery] Guid? instituicaoId, [FromQuery] Guid? pacienteId, [FromQuery] Guid? medicoId)
-        => Ok(await agendaService.ListarConsultasAsync(GetUserId(), GetUserRole(), instituicaoId, pacienteId, medicoId));
+    public async Task<IActionResult> Listar([FromQuery] Guid? instituicaoId, [FromQuery] Guid? pacienteId)
+        => Ok(await agendaService.ListarConsultasAsync(GetUserId(), GetUserRole(), instituicaoId, pacienteId));
 
     [HttpGet("{id}")]
     public async Task<IActionResult> ObterPorId(Guid id)

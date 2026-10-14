@@ -76,6 +76,12 @@ public class Paciente
     public ICollection<Consulta> Consultas { get; set; } = new List<Consulta>();
     public ICollection<DocumentoPaciente> Documentos { get; set; } = new List<DocumentoPaciente>();
     public ICollection<AutorizacaoCompartilhamento> Autorizacoes { get; set; } = new List<AutorizacaoCompartilhamento>();
+
+    /// <summary>Consentimento vigente para a instituição de destino ver dados originados na instituição de origem.</summary>
+    public bool TemAutorizacaoAtiva(Guid instituicaoOrigemId, Guid instituicaoDestinoId)
+        => Autorizacoes.Any(a => a.InstituicaoOrigemId == instituicaoOrigemId
+                              && a.InstituicaoDestinoId == instituicaoDestinoId
+                              && a.RevogadaEmUtc == null);
 }
 
 public class Medico

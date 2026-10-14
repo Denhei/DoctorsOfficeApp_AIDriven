@@ -71,6 +71,26 @@ public class ProntuarioTests(ApiFixture api)
     }
 
     [Fact]
+    public async Task Enfermeiro_ve_historico_sem_consultas_nem_documentos_mas_com_autorizacoes()
+    {
+        // Comportamento atual: Enfermeiro passa pelo RBAC, mas o filtro por consentimento só
+        // trata Paciente e Medico; para os demais perfis consultas e documentos ficam vazios.
+        var enfermeiro = await api.ComoAsync(Seed.EnfermeiroB);
+        var resp = await enfermeiro.GetAsync($"/api/pacientes/{Seed.PacienteCarlos}/historico");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var hist = await resp.Json();
+        Assert.Empty(hist["consultas"]!.AsArray());
+        Assert.Empty(hist["evolucoes"]!.AsArray());
+        Assert.Empty(hist["documentos"]!.AsArray());
+        Assert.Single(hist["autorizacoesAtivas"]!.AsArray());
+
+        var docs = await enfermeiro.GetAsync($"/api/pacientes/{Seed.PacienteCarlos}/documentos");
+        Assert.Equal(HttpStatusCode.OK, docs.StatusCode);
+        Assert.Empty(await docs.JsonArray());
+    }
+
+    [Fact]
     public async Task Medico_responsavel_ve_historico_da_propria_instituicao()
     {
         var medicoA = await api.ComoAsync(Seed.MedicoA);
