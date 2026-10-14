@@ -1,5 +1,6 @@
 using System.Text;
 using Consultorio.Api.Data;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
@@ -20,26 +21,16 @@ public interface IProntuarioService
     Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId);
 }
 
-public class ProntuarioService : IProntuarioService
+public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arquivos) : IProntuarioService
 {
     private const long TamanhoMaximoBytes = 5 * 1024 * 1024;
     private static readonly string[] ExtensoesPermitidas = [".pdf", ".jpg", ".jpeg", ".png"];
-
-    private readonly AppDbContext _context;
-    private readonly string _uploadDir;
-
-    public ProntuarioService(AppDbContext context, IConfiguration configuration)
-    {
-        _context = context;
-        _uploadDir = configuration["Storage:UploadDirectory"] ?? "./uploads";
-        Directory.CreateDirectory(_uploadDir);
-    }
 
     public async Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, Guid medicoUsuarioId, RegistrarEvolucaoDto dto)
     {
         var medico = await MedicoDoUsuarioAsync(medicoUsuarioId, "Usuário não é um médico cadastrado.");
 
-        var consulta = await _context.Consultas
+        var consulta = await context.Consultas
             .Include(c => c.Slot)
             .Include(c => c.Evolucao).ThenInclude(e => e!.Medico).ThenInclude(m => m.Usuario)
             .FirstOrDefaultAsync(c => c.Id == consultaId)
@@ -58,13 +49,13 @@ public class ProntuarioService : IProntuarioService
         if (consulta.Evolucao == null)
         {
             consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medico.Id, Medico = medico };
-            _context.Evolucoes.Add(consulta.Evolucao);
+            context.Evolucoes.Add(consulta.Evolucao);
         }
 
         consulta.Evolucao.Texto = dto.Texto;
         consulta.Evolucao.CriadaEmUtc = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
 
         return consulta.Evolucao.ToDto();
     }
@@ -73,9 +64,9 @@ public class ProntuarioService : IProntuarioService
     {
         var medico = await MedicoDoUsuarioAsync(medicoUsuarioId, "Usuário não é um médico.");
 
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        using var transaction = await context.Database.BeginTransactionAsync();
 
-        var consulta = await _context.Consultas.ComDetalhes().FirstOrDefaultAsync(c => c.Id == consultaId)
+        var consulta = await context.Consultas.ComDetalhes().FirstOrDefaultAsync(c => c.Id == consultaId)
             ?? throw new InvalidOperationException("Consulta não encontrada.");
 
         if (consulta.Slot.MedicoId != medico.Id)
@@ -98,7 +89,7 @@ public class ProntuarioService : IProntuarioService
         // Convite de pesquisa gerado uma única vez, na mesma transação da conclusão.
         if (consulta.PesquisaSatisfacao == null)
         {
-            _context.NotificacoesSimuladas.AddRange(
+            context.NotificacoesSimuladas.AddRange(
                 ConvitePesquisa(consulta, CanalNotificacao.WhatsApp,
                     $"Pesquisa de Satisfação - {consulta.Slot.Instituicao.Nome}",
                     $"Olá {consulta.Paciente.Nome}! Sua consulta com o(a) {consulta.Slot.Medico.Usuario.NomeCompleto} foi finalizada. Por favor, avalie sua experiência."),
@@ -107,7 +98,7 @@ public class ProntuarioService : IProntuarioService
                     $"Prezado(a) {consulta.Paciente.Nome}, sua opinião é muito importante para nós. Acesse a pesquisa de satisfação em nosso portal."));
         }
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
         await transaction.CommitAsync();
 
         return consulta.ToDto();
@@ -120,7 +111,7 @@ public class ProntuarioService : IProntuarioService
             throw new UnauthorizedAccessException("Atendentes e Administradores Técnicos não possuem permissão de acesso ao histórico clínico.");
         }
 
-        var paciente = await _context.Pacientes
+        var paciente = await context.Pacientes
             .Include(p => p.Consultas).ThenInclude(c => c.Evolucao).ThenInclude(e => e!.Medico).ThenInclude(m => m.Usuario)
             .Include(p => p.Consultas).ThenInclude(c => c.Coleta)
             .Include(p => p.Consultas).ThenInclude(c => c.Slot).ThenInclude(s => s.Medico).ThenInclude(m => m.Usuario)
@@ -145,7 +136,7 @@ public class ProntuarioService : IProntuarioService
 
             case PerfilUsuario.Medico:
                 var medico = await MedicoDoUsuarioAsync(solicitanteUsuarioId, "Médico não encontrado.");
-                var temConsultaVinculada = await _context.Consultas
+                var temConsultaVinculada = await context.Consultas
                     .AnyAsync(c => c.PacienteId == pacienteId && c.Slot.MedicoId == medico.Id);
                 if (!temConsultaVinculada)
                 {
@@ -181,7 +172,7 @@ public class ProntuarioService : IProntuarioService
             throw new UnauthorizedAccessException("Apenas o próprio paciente ou seu médico podem anexar documentos.");
         }
 
-        var paciente = await _context.Pacientes.FindAsync(pacienteId)
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
         if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
@@ -200,13 +191,9 @@ public class ProntuarioService : IProntuarioService
             throw new InvalidOperationException("Formato de arquivo não suportado. Utilize PDF, JPG ou PNG.");
         }
 
-        var chaveArquivo = $"{Guid.NewGuid()}{extensao}";
-        await using (var stream = File.Create(Path.Combine(_uploadDir, chaveArquivo)))
-        {
-            await arquivo.CopyToAsync(stream);
-        }
+        var chaveArquivo = await arquivos.SalvarAsync(arquivo, extensao);
 
-        var instituicao = await _context.Instituicoes.FindAsync(instituicaoOrigemId);
+        var instituicao = await context.Instituicoes.FindAsync(instituicaoOrigemId);
 
         var documento = new DocumentoPaciente
         {
@@ -222,8 +209,8 @@ public class ProntuarioService : IProntuarioService
             CriadoEmUtc = DateTime.UtcNow
         };
 
-        _context.DocumentosPaciente.Add(documento);
-        await _context.SaveChangesAsync();
+        context.DocumentosPaciente.Add(documento);
+        await context.SaveChangesAsync();
 
         return documento.ToDto();
     }
@@ -241,7 +228,7 @@ public class ProntuarioService : IProntuarioService
             throw new UnauthorizedAccessException("Atendentes e Administradores não possuem permissão para download de arquivos clínicos.");
         }
 
-        var documento = await _context.DocumentosPaciente
+        var documento = await context.DocumentosPaciente
             .Include(d => d.Paciente).ThenInclude(p => p.Autorizacoes)
             .FirstOrDefaultAsync(d => d.Id == documentoId);
 
@@ -256,7 +243,7 @@ public class ProntuarioService : IProntuarioService
         {
             var medico = await MedicoDoUsuarioAsync(solicitanteUsuarioId, "Médico não encontrado.");
 
-            var temConsulta = await _context.Consultas.AnyAsync(c => c.PacienteId == documento.PacienteId && c.Slot.MedicoId == medico.Id);
+            var temConsulta = await context.Consultas.AnyAsync(c => c.PacienteId == documento.PacienteId && c.Slot.MedicoId == medico.Id);
             if (!temConsulta) throw new UnauthorizedAccessException("Acesso negado.");
 
             if (documento.InstituicaoOrigemId != medico.InstituicaoId
@@ -266,18 +253,16 @@ public class ProntuarioService : IProntuarioService
             }
         }
 
-        var caminho = Path.Combine(_uploadDir, documento.ChaveArquivo);
-        var bytes = File.Exists(caminho)
-            ? await File.ReadAllBytesAsync(caminho)
-            // Documentos do seed não existem em disco: entrega um conteúdo fictício de demonstração.
-            : Encoding.UTF8.GetBytes($"[Arquivo Fictício de Demonstração]: {documento.NomeOriginal}\nPaciente ID: {documento.PacienteId}\nOrigem ID: {documento.InstituicaoOrigemId}");
+        // Documentos do seed não existem em disco: entrega um conteúdo fictício de demonstração.
+        var bytes = await arquivos.LerAsync(documento.ChaveArquivo)
+            ?? Encoding.UTF8.GetBytes($"[Arquivo Fictício de Demonstração]: {documento.NomeOriginal}\nPaciente ID: {documento.PacienteId}\nOrigem ID: {documento.InstituicaoOrigemId}");
 
         return (bytes, documento.Tipo, documento.NomeOriginal);
     }
 
     public async Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, Guid pacienteUsuarioId)
     {
-        var paciente = await _context.Pacientes.FindAsync(pacienteId)
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
         if (paciente.UsuarioId != pacienteUsuarioId)
@@ -290,8 +275,8 @@ public class ProntuarioService : IProntuarioService
             throw new InvalidOperationException("Instituição de origem e destino devem ser diferentes.");
         }
 
-        var origem = await _context.Instituicoes.FindAsync(dto.InstituicaoOrigemId);
-        var destino = await _context.Instituicoes.FindAsync(dto.InstituicaoDestinoId);
+        var origem = await context.Instituicoes.FindAsync(dto.InstituicaoOrigemId);
+        var destino = await context.Instituicoes.FindAsync(dto.InstituicaoDestinoId);
 
         var autorizacao = new AutorizacaoCompartilhamento
         {
@@ -305,15 +290,15 @@ public class ProntuarioService : IProntuarioService
             RevogadaEmUtc = null
         };
 
-        _context.AutorizacoesCompartilhamento.Add(autorizacao);
-        await _context.SaveChangesAsync();
+        context.AutorizacoesCompartilhamento.Add(autorizacao);
+        await context.SaveChangesAsync();
 
         return autorizacao.ToDto();
     }
 
     public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, Guid pacienteUsuarioId)
     {
-        var autorizacao = await _context.AutorizacoesCompartilhamento
+        var autorizacao = await context.AutorizacoesCompartilhamento
             .Include(a => a.Paciente)
             .FirstOrDefaultAsync(a => a.Id == autorizacaoId);
 
@@ -327,7 +312,7 @@ public class ProntuarioService : IProntuarioService
         if (autorizacao.RevogadaEmUtc == null)
         {
             autorizacao.RevogadaEmUtc = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
 
         return true;
@@ -335,7 +320,7 @@ public class ProntuarioService : IProntuarioService
 
     public async Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId)
     {
-        var paciente = await _context.Pacientes.FindAsync(pacienteId)
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
             ?? throw new InvalidOperationException("Paciente não encontrado.");
 
         if (paciente.UsuarioId != pacienteUsuarioId)
@@ -343,7 +328,7 @@ public class ProntuarioService : IProntuarioService
             throw new UnauthorizedAccessException("Acesso negado.");
         }
 
-        var autorizacoes = await _context.AutorizacoesCompartilhamento
+        var autorizacoes = await context.AutorizacoesCompartilhamento
             .Include(a => a.Paciente)
             .Include(a => a.InstituicaoOrigem)
             .Include(a => a.InstituicaoDestino)
@@ -366,6 +351,6 @@ public class ProntuarioService : IProntuarioService
     };
 
     private async Task<Medico> MedicoDoUsuarioAsync(Guid usuarioId, string mensagemSeAusente)
-        => await _context.Medicos.Include(m => m.Usuario).FirstOrDefaultAsync(m => m.UsuarioId == usuarioId)
+        => await context.Medicos.Include(m => m.Usuario).FirstOrDefaultAsync(m => m.UsuarioId == usuarioId)
            ?? throw new UnauthorizedAccessException(mensagemSeAusente);
 }

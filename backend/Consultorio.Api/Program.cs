@@ -7,19 +7,23 @@ using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Configurações de Conexão
-var postgresConn = builder.Configuration.GetConnectionString("PostgresConnection") 
-    ?? "Host=localhost;Port=5432;Database=consultorio_db;Username=postgres;Password=postgrespassword";
+// 1. Configuração tipada (validada na subida)
+builder.Services.AddOptions<JwtOptions>().BindConfiguration(JwtOptions.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<StorageOptions>().BindConfiguration(StorageOptions.Secao);
 
+// 2. Persistência
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(postgresConn));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("PostgresConnection")));
+builder.Services.AddSingleton<MongoDbContext>();
+builder.Services.AddSingleton<ArmazenamentoArquivos>();
 
-// 2. Configurações do Identity
+// 3. Identity
 builder.Services.AddIdentity<Usuario, Papel>(options =>
 {
     options.Password.RequireDigit = false;
@@ -32,40 +36,33 @@ builder.Services.AddIdentity<Usuario, Papel>(options =>
 .AddEntityFrameworkStores<AppDbContext>()
 .AddDefaultTokenProviders();
 
-// 3. Configurações do JWT
-System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
-
-var jwtSecretKey = builder.Configuration["Jwt:SecretKey"] 
-    ?? "CHAVE_SECRETA_SUPER_LONGA_POC_CONSULTORIO_2026_ACADEMICA_SEGURA_MIN_32_BYTES!";
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "ConsultorioApi";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "ConsultorioApp";
-
+// 4. JWT: validação lê as mesmas JwtOptions que o JwtTokenGenerator usa para assinar
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer(options =>
-{
-    options.RequireHttpsMetadata = false;
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
-        ValidateIssuer = true,
-        ValidIssuer = jwtIssuer,
-        ValidateAudience = true,
-        ValidAudience = jwtAudience,
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
-    };
-});
+.AddJwtBearer();
 
-// 4. Injeção de Dependências
-builder.Services.AddExceptionHandler<TratadorGlobalDeExcecoes>();
-builder.Services.AddProblemDetails(); // fallback (500 em application/problem+json) para exceções não mapeadas
-builder.Services.AddSingleton<MongoDbContext>();
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtOptions>>((bearer, jwt) =>
+    {
+        bearer.RequireHttpsMetadata = false;
+        bearer.SaveToken = true;
+        bearer.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Value.SecretKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwt.Value.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwt.Value.Audience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+// 5. Serviços de domínio
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITriagemChatService, TriagemChatService>();
@@ -77,7 +74,11 @@ builder.Services.AddScoped<IInstituicaoService, InstituicaoService>();
 builder.Services.AddScoped<IPacienteService, PacienteService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 
-// 5. CORS
+// 6. Erros de regra e de autorização → HTTP, num único lugar
+builder.Services.AddExceptionHandler<TratadorGlobalDeExcecoes>();
+builder.Services.AddProblemDetails(); // fallback (500 em application/problem+json) para exceções não mapeadas
+
+// 7. CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -89,7 +90,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 6. Controllers & JSON
+// 8. Controllers & JSON
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -97,7 +98,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     });
 
-// 7. Swagger / OpenAPI
+// 9. Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -122,11 +123,7 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
             },
             Array.Empty<string>()
         }
@@ -135,18 +132,17 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// 8. Executar Migrations e Seed no Startup
+// 10. Migrations e seed na subida
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     try
     {
-        var context = services.GetRequiredService<AppDbContext>();
-        var userManager = services.GetRequiredService<UserManager<Usuario>>();
-        var roleManager = services.GetRequiredService<RoleManager<Papel>>();
-        var mongoContext = services.GetRequiredService<MongoDbContext>();
-
-        await DbInitializer.SeedAsync(context, userManager, roleManager, mongoContext);
+        await DbInitializer.SeedAsync(
+            services.GetRequiredService<AppDbContext>(),
+            services.GetRequiredService<UserManager<Usuario>>(),
+            services.GetRequiredService<RoleManager<Papel>>(),
+            services.GetRequiredService<MongoDbContext>());
         Console.WriteLine(">>> Banco de dados inicializado e Seed aplicado com sucesso!");
     }
     catch (Exception ex)
@@ -155,16 +151,13 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 9. Pipeline HTTP
+// 11. Pipeline HTTP
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Consultorio API v1");
-    });
+    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Consultorio API v1"));
 }
 
 app.UseCors("AllowFrontend");
