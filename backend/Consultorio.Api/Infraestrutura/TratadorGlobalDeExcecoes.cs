@@ -1,28 +1,29 @@
-using Consultorio.Api.Services;
-using Microsoft.AspNetCore.Diagnostics;
+using Consultorio.Api.Dominio;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Consultorio.Api.Infraestrutura;
 
 /// <summary>
-/// Único ponto que traduz exceções de regra e de autorização em resposta HTTP
-/// no formato <c>{ "mensagem": "..." }</c>. Outras exceções seguem para o pipeline padrão (500).
+/// Único ponto que traduz as exceções de domínio lançadas pelas ações em resposta HTTP
+/// <c>{ "mensagem": "..." }</c>. Vale só dentro do MVC, então falhas de infraestrutura
+/// (configuração, disco, banco) continuam sendo 500 e são registradas como erro.
 /// </summary>
-public sealed class TratadorGlobalDeExcecoes : IExceptionHandler
+public sealed class TratadorGlobalDeExcecoes : IExceptionFilter
 {
-    public async ValueTask<bool> TryHandleAsync(HttpContext http, Exception excecao, CancellationToken ct)
+    public void OnException(ExceptionContext contexto)
     {
-        int? status = excecao switch
+        int? status = contexto.Exception switch
         {
             ConflitoException => StatusCodes.Status409Conflict,
-            UnauthorizedAccessException => StatusCodes.Status403Forbidden,
-            InvalidOperationException => StatusCodes.Status400BadRequest,
+            RegraDeNegocioException => StatusCodes.Status400BadRequest,
+            AcessoNegadoException => StatusCodes.Status403Forbidden,
             _ => null,
         };
 
-        if (status is null) return false;
+        if (status is null) return;
 
-        http.Response.StatusCode = status.Value;
-        await http.Response.WriteAsJsonAsync(new { mensagem = excecao.Message }, ct);
-        return true;
+        contexto.Result = new ObjectResult(new { mensagem = contexto.Exception.Message }) { StatusCode = status };
+        contexto.ExceptionHandled = true;
     }
 }

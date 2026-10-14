@@ -1,6 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
-using Consultorio.Api.Infraestrutura;
+using Consultorio.Api.Dominio;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Microsoft.AspNetCore.Identity;
@@ -48,21 +48,21 @@ public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesq
         var consulta = await context.Consultas
             .Include(c => c.PesquisaSatisfacao)
             .FirstOrDefaultAsync(c => c.Id == consultaId && c.PacienteId == pacienteId)
-            ?? throw new InvalidOperationException("Consulta não encontrada.");
+            ?? throw new RegraDeNegocioException("Consulta não encontrada.");
 
         if (consulta.Status != StatusConsulta.Concluida)
         {
-            throw new InvalidOperationException("A pesquisa de satisfação só pode ser respondida após a conclusão da consulta.");
+            throw new RegraDeNegocioException("A pesquisa de satisfação só pode ser respondida após a conclusão da consulta.");
         }
 
         if (consulta.PesquisaSatisfacao != null)
         {
-            throw new InvalidOperationException("Esta pesquisa de satisfação já foi respondida previamente.");
+            throw new RegraDeNegocioException("Esta pesquisa de satisfação já foi respondida previamente.");
         }
 
         if (dto.Nota < 1 || dto.Nota > 5)
         {
-            throw new InvalidOperationException("A nota de avaliação deve ser entre 1 e 5.");
+            throw new RegraDeNegocioException("A nota de avaliação deve ser entre 1 e 5.");
         }
 
         var pesquisa = new PesquisaSatisfacao
@@ -82,7 +82,7 @@ public class NotificacaoPesquisaService(AppDbContext context) : INotificacaoPesq
     }
 
     private static Guid PacienteIdDe(UsuarioAtual usuario)
-        => usuario.PacienteId ?? throw new UnauthorizedAccessException("Paciente não encontrado.");
+        => usuario.PacienteId ?? throw new AcessoNegadoException("Paciente não encontrado.");
 }
 
 // --- Dashboard Operacional ---
@@ -188,7 +188,7 @@ public class PacienteService(AppDbContext context, UserManager<Usuario> userMana
 
         if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado aos dados de outro paciente.");
+            throw new AcessoNegadoException("Acesso negado aos dados de outro paciente.");
         }
 
         return paciente.ToDto();
@@ -217,11 +217,11 @@ public class PacienteService(AppDbContext context, UserManager<Usuario> userMana
     public async Task<PacienteDto> AtualizarPacienteAsync(Guid id, AtualizarPacienteDto dto, UsuarioAtual solicitante)
     {
         var paciente = await context.Pacientes.FindAsync(id)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
         if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
         if (!string.IsNullOrWhiteSpace(dto.TelefoneFicticio))
@@ -255,7 +255,7 @@ public class AdminService(AppDbContext context, UserManager<Usuario> userManager
         if (dto.Perfil == PerfilUsuario.Medico)
         {
             if (!dto.InstituicaoId.HasValue)
-                throw new InvalidOperationException("Médico deve ter uma instituição vinculada.");
+                throw new RegraDeNegocioException("Médico deve ter uma instituição vinculada.");
 
             context.Medicos.Add(new Medico
             {

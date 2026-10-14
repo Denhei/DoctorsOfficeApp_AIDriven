@@ -74,10 +74,6 @@ builder.Services.AddScoped<IInstituicaoService, InstituicaoService>();
 builder.Services.AddScoped<IPacienteService, PacienteService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 
-// 6. Erros de regra e de autorização traduzidos para HTTP num único lugar
-builder.Services.AddExceptionHandler<TratadorGlobalDeExcecoes>();
-builder.Services.AddProblemDetails(); // fallback (500 em application/problem+json) para exceções não mapeadas
-
 // 7. CORS
 builder.Services.AddCors(options =>
 {
@@ -90,15 +86,15 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 8. Controllers & JSON
-builder.Services.AddControllers()
+// 6. Controllers & JSON (as exceções de domínio viram { mensagem } no TratadorGlobalDeExcecoes)
+builder.Services.AddControllers(options => options.Filters.Add<TratadorGlobalDeExcecoes>())
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
         options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     });
 
-// 9. Swagger / OpenAPI
+// 8. Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -132,7 +128,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// 10. Migrations e seed na subida
+// 9. Migrations e seed na subida
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -151,9 +147,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 11. Pipeline HTTP
-app.UseExceptionHandler();
-
+// 10. Pipeline HTTP
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

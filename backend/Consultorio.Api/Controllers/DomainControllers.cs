@@ -1,5 +1,5 @@
 using Consultorio.Api.DTOs;
-using Consultorio.Api.Infraestrutura;
+using Consultorio.Api.Dominio;
 using Consultorio.Api.Models.Enums;
 using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -7,8 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Consultorio.Api.Controllers;
 
-// Exceções de regra (InvalidOperationException, ConflitoException) e de autorização
-// (UnauthorizedAccessException) são traduzidas para HTTP por TratadorGlobalDeExcecoes.
+// RegraDeNegocioException, ConflitoException e AcessoNegadoException viram { mensagem } no TratadorGlobalDeExcecoes.
 public abstract class ConsultorioControllerBase : ControllerBase
 {
     private UsuarioAtual? _solicitante;

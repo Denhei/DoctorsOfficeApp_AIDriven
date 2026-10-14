@@ -1,6 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
-using Consultorio.Api.Infraestrutura;
+using Consultorio.Api.Dominio;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Consultorio.Api.Models.Mongo;
@@ -24,10 +24,10 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
     public async Task<ConversaDetalheDto> IniciarColetaAsync(Guid pacienteId, Guid instituicaoId)
     {
         var paciente = await context.Pacientes.FindAsync(pacienteId)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
         var instituicao = await context.Instituicoes.FindAsync(instituicaoId)
-            ?? throw new InvalidOperationException("Instituição não encontrada.");
+            ?? throw new RegraDeNegocioException("Instituição não encontrada.");
 
         var coleta = new ColetaInicial
         {
@@ -69,7 +69,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
 
         if (solicitante.Perfil == PerfilUsuario.Paciente && coleta.Paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado aos dados de outro paciente.");
+            throw new AcessoNegadoException("Acesso negado aos dados de outro paciente.");
         }
 
         var conversa = await ConversaAsync(coleta.ConversaId);
@@ -84,11 +84,11 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
 
         if (coleta.Status != StatusColeta.EmColeta)
         {
-            throw new InvalidOperationException("Esta coleta já foi enviada para triagem e não pode receber novas respostas.");
+            throw new RegraDeNegocioException("Esta coleta já foi enviada para triagem e não pode receber novas respostas.");
         }
 
         var conversa = await ConversaAsync(coleta.ConversaId)
-            ?? throw new InvalidOperationException("Conversa não encontrada no MongoDB.");
+            ?? throw new RegraDeNegocioException("Conversa não encontrada no MongoDB.");
 
         // Reenvio do mesmo ClienteMessageId devolve o estado atual sem reprocessar.
         if (!string.IsNullOrEmpty(dto.ClienteMessageId) && conversa.Mensagens.Any(m => m.ClienteMessageId == dto.ClienteMessageId))
@@ -120,7 +120,7 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
         var coleta = await ColetaDoPacienteAsync(coletaId, solicitante.Id);
 
         var conversa = await ConversaAsync(coleta.ConversaId)
-            ?? throw new InvalidOperationException("Conversa não encontrada.");
+            ?? throw new RegraDeNegocioException("Conversa não encontrada.");
 
         coleta.Status = StatusColeta.PendenteValidacao;
         await context.SaveChangesAsync();
@@ -190,11 +190,11 @@ public class TriagemChatService(AppDbContext context, MongoDbContext mongo) : IT
             .Include(c => c.Paciente)
             .Include(c => c.Instituicao)
             .FirstOrDefaultAsync(c => c.Id == coletaId)
-            ?? throw new InvalidOperationException("Coleta não encontrada.");
+            ?? throw new RegraDeNegocioException("Coleta não encontrada.");
 
         if (coleta.Paciente.UsuarioId != pacienteUsuarioId)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
         return coleta;

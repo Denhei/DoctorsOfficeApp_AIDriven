@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Consultorio.Api.Models.Enums;
 
-namespace Consultorio.Api.Infraestrutura;
+namespace Consultorio.Api.Dominio;
 
 /// <summary>
 /// Quem está fazendo a requisição, lido uma única vez dos claims que <c>JwtTokenGenerator</c> emite.
@@ -12,11 +12,11 @@ public sealed record UsuarioAtual(Guid Id, PerfilUsuario Perfil, Guid? Instituic
     public static UsuarioAtual De(ClaimsPrincipal principal)
     {
         var id = GuidOuNulo(principal, ClaimTypes.NameIdentifier)
-            ?? throw new UnauthorizedAccessException("Token sem identificador de usuário.");
+            ?? throw new AcessoNegadoException("Token sem identificador de usuário.");
 
         var perfil = Enum.TryParse<PerfilUsuario>(principal.FindFirstValue(ClaimTypes.Role), out var p)
             ? p
-            : throw new UnauthorizedAccessException("Token sem perfil.");
+            : throw new AcessoNegadoException("Token sem perfil.");
 
         return new UsuarioAtual(
             id,

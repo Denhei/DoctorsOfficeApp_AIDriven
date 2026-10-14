@@ -1,3 +1,4 @@
+using Consultorio.Api.Dominio;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
@@ -48,7 +49,7 @@ public static class Usuarios
         if (!resultado.Succeeded)
         {
             var erros = string.Join(", ", resultado.Errors.Select(e => e.Description));
-            throw new InvalidOperationException($"Erro ao criar usuário: {erros}");
+            throw new RegraDeNegocioException($"Erro ao criar usuário: {erros}");
         }
 
         await userManager.AddToRoleAsync(usuario, perfil.ToString());

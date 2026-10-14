@@ -1,6 +1,6 @@
 using Consultorio.Api.Data;
 using Consultorio.Api.DTOs;
-using Consultorio.Api.Infraestrutura;
+using Consultorio.Api.Dominio;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -57,11 +57,11 @@ public class AgendaService(AppDbContext context) : IAgendaService
             .Include(m => m.Usuario)
             .Include(m => m.Instituicao)
             .FirstOrDefaultAsync(m => m.Id == dto.MedicoId && m.InstituicaoId == instituicaoId)
-            ?? throw new InvalidOperationException("Médico não encontrado ou não pertence a esta instituição.");
+            ?? throw new RegraDeNegocioException("Médico não encontrado ou não pertence a esta instituição.");
 
         if (dto.FimUtc <= dto.InicioUtc)
         {
-            throw new InvalidOperationException("Horário de fim deve ser posterior ao início.");
+            throw new RegraDeNegocioException("Horário de fim deve ser posterior ao início.");
         }
 
         var sobreposicao = await context.SlotsAgenda
@@ -69,7 +69,7 @@ public class AgendaService(AppDbContext context) : IAgendaService
 
         if (sobreposicao)
         {
-            throw new InvalidOperationException("Já existe um slot cadastrado para este médico no mesmo horário.");
+            throw new RegraDeNegocioException("Já existe um slot cadastrado para este médico no mesmo horário.");
         }
 
         var slot = new SlotAgenda
@@ -96,35 +96,35 @@ public class AgendaService(AppDbContext context) : IAgendaService
         var paciente = await context.Pacientes
             .FromSqlRaw("SELECT * FROM \"Pacientes\" WHERE \"Id\" = {0} FOR UPDATE", dto.PacienteId)
             .FirstOrDefaultAsync()
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
         if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Você só pode agendar consultas para seu próprio cadastro.");
+            throw new AcessoNegadoException("Você só pode agendar consultas para seu próprio cadastro.");
         }
 
         var coleta = await context.ColetasIniciais.FirstOrDefaultAsync(c => c.Id == dto.ColetaId && c.PacienteId == dto.PacienteId)
-            ?? throw new InvalidOperationException("Coleta inicial não encontrada.");
+            ?? throw new RegraDeNegocioException("Coleta inicial não encontrada.");
 
         if (coleta.Status != StatusColeta.Validada)
         {
-            throw new InvalidOperationException("O agendamento só é permitido após a validação da triagem pelo enfermeiro.");
+            throw new RegraDeNegocioException("O agendamento só é permitido após a validação da triagem pelo enfermeiro.");
         }
 
         var slot = await context.SlotsAgenda
             .Include(s => s.Medico).ThenInclude(m => m.Usuario)
             .Include(s => s.Instituicao)
             .FirstOrDefaultAsync(s => s.Id == dto.SlotId)
-            ?? throw new InvalidOperationException("Slot de agenda não encontrado.");
+            ?? throw new RegraDeNegocioException("Slot de agenda não encontrado.");
 
         if (slot.InstituicaoId != coleta.InstituicaoId)
         {
-            throw new InvalidOperationException("A instituição do médico escolhido deve ser a mesma da coleta validada.");
+            throw new RegraDeNegocioException("A instituição do médico escolhido deve ser a mesma da coleta validada.");
         }
 
         if (slot.InicioUtc <= DateTime.UtcNow.AddMinutes(-5))
         {
-            throw new InvalidOperationException("Não é possível agendar consultas em horários passados.");
+            throw new RegraDeNegocioException("Não é possível agendar consultas em horários passados.");
         }
 
         var slotOcupado = await context.Consultas
@@ -213,13 +213,13 @@ public class AgendaService(AppDbContext context) : IAgendaService
 
         if (solicitante.Perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
         // Qualquer médico cadastrado pode ler a consulta; só é negado o perfil Medico sem registro de Medico.
         if (solicitante.Perfil == PerfilUsuario.Medico && solicitante.MedicoId is null)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
         return consulta.ToDto();
@@ -238,15 +238,15 @@ public class AgendaService(AppDbContext context) : IAgendaService
         {
             case StatusConsulta.Cancelada:
                 if (solicitante.Perfil == PerfilUsuario.Paciente && consulta.Paciente.UsuarioId != solicitante.Id)
-                    throw new UnauthorizedAccessException("Acesso negado.");
+                    throw new AcessoNegadoException("Acesso negado.");
 
                 if (consulta.Status == StatusConsulta.Concluida)
-                    throw new InvalidOperationException("Consultas já concluídas não podem ser canceladas.");
+                    throw new RegraDeNegocioException("Consultas já concluídas não podem ser canceladas.");
                 break;
 
             case StatusConsulta.EmAtendimento:
                 if (solicitante.Perfil != PerfilUsuario.Medico || consulta.Slot.Medico.UsuarioId != solicitante.Id)
-                    throw new UnauthorizedAccessException("Apenas o médico responsável pode iniciar o atendimento.");
+                    throw new AcessoNegadoException("Apenas o médico responsável pode iniciar o atendimento.");
                 break;
 
             default:
