@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Observable, tap } from 'rxjs';
+import { API_URL } from './api-url';
 
 export interface UsuarioInfo {
   id: string;
@@ -24,7 +25,7 @@ export interface AuthResponse {
   providedIn: 'root'
 })
 export class AuthService {
-  private readonly apiUrl = 'http://localhost:5000/api';
+  private readonly apiUrl = API_URL;
   private readonly tokenKey = 'consultorio_token';
   private readonly userKey = 'consultorio_user';
 

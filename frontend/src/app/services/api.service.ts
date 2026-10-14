@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { API_URL } from './api-url';
+import { UsuarioInfo } from './auth.service';
 
 export interface Instituicao {
   id: string;
@@ -79,6 +81,8 @@ export interface ConversaDetalhe {
   criadaEmUtc: string;
 }
 
+export type MensagemChat = ConversaDetalhe['mensagens'][number];
+
 export interface ColetaItemFila {
   id: string;
   pacienteId: string;
@@ -156,6 +160,17 @@ export interface PesquisaSatisfacao {
   respondidaEmUtc: string;
 }
 
+/** Corpo padrão das respostas de confirmação e de erro da API. */
+export interface Mensagem {
+  mensagem: string;
+}
+
+export interface HealthStatus {
+  status: 'Healthy' | 'Degraded';
+  timestampUtc: string;
+  servicos: { postgreSql: 'Online' | 'Offline'; mongoDb: 'Online' | 'Offline' };
+}
+
 export interface DashboardOperacional {
   totalConsultasAgendadas: number;
   totalConsultasEmAtendimento: number;
@@ -170,7 +185,7 @@ export interface DashboardOperacional {
   providedIn: 'root'
 })
 export class ApiService {
-  private readonly baseUrl = 'http://localhost:5000/api';
+  private readonly baseUrl = API_URL;
 
   constructor(private http: HttpClient) {}
 
@@ -180,8 +195,7 @@ export class ApiService {
   }
 
   getMedicos(instituicaoId?: string): Observable<Medico[]> {
-    const params = instituicaoId ? `?instituicaoId=${instituicaoId}` : '';
-    return this.http.get<Medico[]>(`${this.baseUrl}/medicos${params}`);
+    return this.http.get<Medico[]>(`${this.baseUrl}/medicos`, { params: this.params({ instituicaoId }) });
   }
 
   // Coleta & Chat
@@ -209,18 +223,13 @@ export class ApiService {
     return this.http.get<ColetaItemFila[]>(`${this.baseUrl}/coletas?status=PendenteValidacao`);
   }
 
-  validarColeta(coletaId: string, dados: { aprovadoParaAgendamento: boolean; resumoCorrigido: string; observacaoEnfermeiro?: string }): Observable<any> {
-    return this.http.put(`${this.baseUrl}/coletas/${coletaId}/validacao`, dados);
+  validarColeta(coletaId: string, dados: { aprovadoParaAgendamento: boolean; resumoCorrigido: string; observacaoEnfermeiro?: string }): Observable<Mensagem> {
+    return this.http.put<Mensagem>(`${this.baseUrl}/coletas/${coletaId}/validacao`, dados);
   }
 
   // Slots & Agenda
   getSlots(medicoId?: string, instituicaoId?: string, data?: string): Observable<SlotAgenda[]> {
-    let query = [];
-    if (medicoId) query.push(`medicoId=${medicoId}`);
-    if (instituicaoId) query.push(`instituicaoId=${instituicaoId}`);
-    if (data) query.push(`data=${data}`);
-    const qs = query.length ? `?${query.join('&')}` : '';
-    return this.http.get<SlotAgenda[]>(`${this.baseUrl}/slots${qs}`);
+    return this.http.get<SlotAgenda[]>(`${this.baseUrl}/slots`, { params: this.params({ medicoId, instituicaoId, data }) });
   }
 
   criarSlot(dados: { medicoId: string; instituicaoId: string; inicioUtc: string; fimUtc: string }): Observable<SlotAgenda> {
@@ -232,21 +241,16 @@ export class ApiService {
     return this.http.post<Consulta>(`${this.baseUrl}/consultas`, dados);
   }
 
-  getConsultas(instituicaoId?: string, pacienteId?: string, medicoId?: string): Observable<Consulta[]> {
-    let query = [];
-    if (instituicaoId) query.push(`instituicaoId=${instituicaoId}`);
-    if (pacienteId) query.push(`pacienteId=${pacienteId}`);
-    if (medicoId) query.push(`medicoId=${medicoId}`);
-    const qs = query.length ? `?${query.join('&')}` : '';
-    return this.http.get<Consulta[]>(`${this.baseUrl}/consultas${qs}`);
+  getConsultas(instituicaoId?: string, pacienteId?: string): Observable<Consulta[]> {
+    return this.http.get<Consulta[]>(`${this.baseUrl}/consultas`, { params: this.params({ instituicaoId, pacienteId }) });
   }
 
   getConsulta(id: string): Observable<Consulta> {
     return this.http.get<Consulta>(`${this.baseUrl}/consultas/${id}`);
   }
 
-  atualizarStatusConsulta(id: string, novoStatus: string): Observable<any> {
-    return this.http.patch(`${this.baseUrl}/consultas/${id}/status`, { novoStatus });
+  atualizarStatusConsulta(id: string, novoStatus: string): Observable<Mensagem> {
+    return this.http.patch<Mensagem>(`${this.baseUrl}/consultas/${id}/status`, { novoStatus });
   }
 
   registrarEvolucao(consultaId: string, texto: string): Observable<Evolucao> {
@@ -284,8 +288,8 @@ export class ApiService {
     });
   }
 
-  revogarAutorizacao(autorizacaoId: string): Observable<any> {
-    return this.http.delete(`${this.baseUrl}/autorizacoes/${autorizacaoId}`);
+  revogarAutorizacao(autorizacaoId: string): Observable<Mensagem> {
+    return this.http.delete<Mensagem>(`${this.baseUrl}/autorizacoes/${autorizacaoId}`);
   }
 
   // Notificações & Pesquisa
@@ -307,11 +311,19 @@ export class ApiService {
   }
 
   // Admin
-  getUsuariosAdmin(): Observable<any[]> {
-    return this.http.get<any[]>(`${this.baseUrl}/admin/usuarios`);
+  getUsuariosAdmin(): Observable<UsuarioInfo[]> {
+    return this.http.get<UsuarioInfo[]>(`${this.baseUrl}/admin/usuarios`);
   }
 
-  getHealth(): Observable<any> {
-    return this.http.get<any>(`${this.baseUrl}/health`);
+  getHealth(): Observable<HealthStatus> {
+    return this.http.get<HealthStatus>(`${this.baseUrl}/health`);
+  }
+
+  /** Só envia os parâmetros informados. */
+  private params(valores: Record<string, string | undefined>): HttpParams {
+    return Object.entries(valores).reduce(
+      (p, [chave, valor]) => (valor ? p.set(chave, valor) : p),
+      new HttpParams()
+    );
   }
 }

@@ -133,9 +133,10 @@ export class HistoricoPacienteComponent implements OnInit {
     });
   }
 
-  onFileSelected(event: any) {
-    if (event.target.files.length > 0) {
-      this.arquivoSelecionado = event.target.files[0];
+  onFileSelected(event: Event) {
+    const arquivos = (event.target as HTMLInputElement).files;
+    if (arquivos?.length) {
+      this.arquivoSelecionado = arquivos[0];
     }
   }
 
