@@ -1,4 +1,7 @@
+using System.Text;
 using Consultorio.Api.Data;
+using Consultorio.Api.Dominio;
+using Consultorio.Api.Infraestrutura;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Models.Entities;
 using Consultorio.Api.Models.Enums;
@@ -8,168 +11,110 @@ namespace Consultorio.Api.Services;
 
 public interface IProntuarioService
 {
-    Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, Guid medicoUsuarioId, RegistrarEvolucaoDto dto);
-    Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, Guid medicoUsuarioId);
-    Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, Guid solicitanteUsuarioId, PerfilUsuario perfil);
-    Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, Guid pacienteUsuarioId);
-    Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, Guid pacienteUsuarioId);
-    Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId);
+    Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, UsuarioAtual medico, RegistrarEvolucaoDto dto);
+    Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, UsuarioAtual medico);
+    Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, UsuarioAtual solicitante);
+    Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, UsuarioAtual solicitante);
+    Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, UsuarioAtual solicitante);
+    Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, UsuarioAtual solicitante);
+    Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, UsuarioAtual solicitante);
+    Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, UsuarioAtual solicitante);
+    Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, UsuarioAtual solicitante);
 }
 
-public class ProntuarioService : IProntuarioService
+public class ProntuarioService(AppDbContext context, ArmazenamentoArquivos arquivos) : IProntuarioService
 {
-    private readonly AppDbContext _context;
-    private readonly IConfiguration _configuration;
-    private readonly string _uploadDir;
+    private const long TamanhoMaximoBytes = 5 * 1024 * 1024;
+    private static readonly string[] ExtensoesPermitidas = [".pdf", ".jpg", ".jpeg", ".png"];
 
-    public ProntuarioService(AppDbContext context, IConfiguration configuration)
+    public async Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, UsuarioAtual medico, RegistrarEvolucaoDto dto)
     {
-        _context = context;
-        _configuration = configuration;
-        _uploadDir = _configuration["Storage:UploadDirectory"] ?? "./uploads";
+        var medicoId = medico.MedicoId ?? throw new AcessoNegadoException("Usuário não é um médico cadastrado.");
 
-        if (!Directory.Exists(_uploadDir))
-        {
-            Directory.CreateDirectory(_uploadDir);
-        }
-    }
-
-    public async Task<EvolucaoDto> RegistrarEvolucaoAsync(Guid consultaId, Guid medicoUsuarioId, RegistrarEvolucaoDto dto)
-    {
-        var medico = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == medicoUsuarioId)
-            ?? throw new UnauthorizedAccessException("Usuário não é um médico cadastrado.");
-
-        var consulta = await _context.Consultas
+        var consulta = await context.Consultas
             .Include(c => c.Slot)
             .Include(c => c.Evolucao)
             .FirstOrDefaultAsync(c => c.Id == consultaId)
-            ?? throw new InvalidOperationException("Consulta não encontrada.");
+            ?? throw new RegraDeNegocioException("Consulta não encontrada.");
 
-        if (consulta.Slot.MedicoId != medico.Id)
+        if (consulta.Slot.MedicoId != medicoId)
         {
-            throw new UnauthorizedAccessException("Apenas o médico responsável por esta consulta pode registrar a evolução.");
+            throw new AcessoNegadoException("Apenas o médico responsável por esta consulta pode registrar a evolução.");
         }
 
         if (string.IsNullOrWhiteSpace(dto.Texto))
         {
-            throw new InvalidOperationException("O texto da evolução clínica é obrigatório.");
+            throw new RegraDeNegocioException("O texto da evolução clínica é obrigatório.");
         }
 
-        if (consulta.Evolucao != null)
+        if (consulta.Evolucao == null)
         {
-            consulta.Evolucao.Texto = dto.Texto;
-            consulta.Evolucao.CriadaEmUtc = DateTime.UtcNow;
-        }
-        else
-        {
-            consulta.Evolucao = new Evolucao
-            {
-                Id = Guid.NewGuid(),
-                ConsultaId = consulta.Id,
-                MedicoId = medico.Id,
-                Texto = dto.Texto,
-                CriadaEmUtc = DateTime.UtcNow
-            };
-            await _context.Evolucoes.AddAsync(consulta.Evolucao);
+            consulta.Evolucao = new Evolucao { ConsultaId = consulta.Id, MedicoId = medicoId };
+            context.Evolucoes.Add(consulta.Evolucao);
         }
 
-        await _context.SaveChangesAsync();
+        consulta.Evolucao.Texto = dto.Texto;
+        consulta.Evolucao.CriadaEmUtc = DateTime.UtcNow;
 
-        var medUser = await _context.Users.FindAsync(medicoUsuarioId);
+        await context.SaveChangesAsync();
 
-        return new EvolucaoDto(
-            consulta.Evolucao.Id,
-            consulta.Id,
-            medico.Id,
-            medUser?.NomeCompleto ?? "Médico",
-            consulta.Evolucao.Texto,
-            consulta.Evolucao.CriadaEmUtc
-        );
+        var evolucaoId = consulta.Evolucao.Id;
+        return await context.Evolucoes.Where(e => e.Id == evolucaoId).Select(Mapeamentos.Evolucao).FirstAsync();
     }
 
-    public async Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, Guid medicoUsuarioId)
+    public async Task<ConsultaDto> ConcluirConsultaAsync(Guid consultaId, UsuarioAtual medico)
     {
-        var medico = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == medicoUsuarioId)
-            ?? throw new UnauthorizedAccessException("Usuário não é um médico.");
+        var medicoId = medico.MedicoId ?? throw new AcessoNegadoException("Usuário não é um médico.");
 
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        using var transaction = await context.Database.BeginTransactionAsync();
 
-        var consulta = await _context.Consultas
-            .Include(c => c.Paciente)
-            .Include(c => c.Coleta)
-            .Include(c => c.Evolucao)
-            .Include(c => c.PesquisaSatisfacao)
-            .Include(c => c.Slot).ThenInclude(s => s.Medico).ThenInclude(m => m.Usuario)
-            .Include(c => c.Slot).ThenInclude(s => s.Instituicao)
-            .FirstOrDefaultAsync(c => c.Id == consultaId)
-            ?? throw new InvalidOperationException("Consulta não encontrada.");
+        var consulta = await context.Consultas.ComDetalhes().FirstOrDefaultAsync(c => c.Id == consultaId)
+            ?? throw new RegraDeNegocioException("Consulta não encontrada.");
 
-        if (consulta.Slot.MedicoId != medico.Id)
+        if (consulta.Slot.MedicoId != medicoId)
         {
-            throw new UnauthorizedAccessException("Apenas o médico responsável pode concluir o atendimento.");
+            throw new AcessoNegadoException("Apenas o médico responsável pode concluir o atendimento.");
         }
 
         if (consulta.Evolucao == null || string.IsNullOrWhiteSpace(consulta.Evolucao.Texto))
         {
-            throw new InvalidOperationException("É obrigatório registrar a evolução médica antes de concluir o atendimento.");
+            throw new RegraDeNegocioException("É obrigatório registrar a evolução médica antes de concluir o atendimento.");
         }
 
         if (consulta.Status == StatusConsulta.Concluida)
         {
-            return MapearConsultaDto(consulta);
+            return consulta.ToDto();
         }
 
         consulta.Status = StatusConsulta.Concluida;
 
-        // Gerar Convite de Pesquisa de Satisfação na mesma transação (uma única vez)
+        // Convite de pesquisa gerado uma única vez, na mesma transação da conclusão.
         if (consulta.PesquisaSatisfacao == null)
         {
-            var notifWhatsapp = new NotificacaoSimulada
-            {
-                Id = Guid.NewGuid(),
-                PacienteId = consulta.PacienteId,
-                ConsultaId = consulta.Id,
-                Canal = CanalNotificacao.WhatsApp,
-                Finalidade = FinalidadeNotificacao.ConvitePesquisa,
-                Titulo = $"Pesquisa de Satisfação - {consulta.Slot.Instituicao.Nome}",
-                Texto = $"Olá {consulta.Paciente.Nome}! Sua consulta com o(a) {consulta.Slot.Medico.Usuario.NomeCompleto} foi finalizada. Por favor, avalie sua experiência.",
-                CriadaEmUtc = DateTime.UtcNow
-            };
-
-            var notifEmail = new NotificacaoSimulada
-            {
-                Id = Guid.NewGuid(),
-                PacienteId = consulta.PacienteId,
-                ConsultaId = consulta.Id,
-                Canal = CanalNotificacao.Email,
-                Finalidade = FinalidadeNotificacao.ConvitePesquisa,
-                Titulo = "Como foi seu atendimento?",
-                Texto = $"Prezado(a) {consulta.Paciente.Nome}, sua opinião é muito importante para nós. Acesse a pesquisa de satisfação em nosso portal.",
-                CriadaEmUtc = DateTime.UtcNow
-            };
-
-            await _context.NotificacoesSimuladas.AddRangeAsync(notifWhatsapp, notifEmail);
+            context.NotificacoesSimuladas.AddRange(
+                ConvitePesquisa(consulta, CanalNotificacao.WhatsApp,
+                    $"Pesquisa de Satisfação - {consulta.Slot.Instituicao.Nome}",
+                    $"Olá {consulta.Paciente.Nome}! Sua consulta com o(a) {consulta.Slot.Medico.Usuario.NomeCompleto} foi finalizada. Por favor, avalie sua experiência."),
+                ConvitePesquisa(consulta, CanalNotificacao.Email,
+                    "Como foi seu atendimento?",
+                    $"Prezado(a) {consulta.Paciente.Nome}, sua opinião é muito importante para nós. Acesse a pesquisa de satisfação em nosso portal."));
         }
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
         await transaction.CommitAsync();
 
-        return MapearConsultaDto(consulta);
+        return consulta.ToDto();
     }
 
-    public async Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<HistoricoPacienteDto> ObterHistoricoPacienteAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
-        // 1. Atendente e Admin Técnico NUNCA acessam histórico clínico
-        if (perfil == PerfilUsuario.Atendente || perfil == PerfilUsuario.Admin)
+        if (solicitante.Perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
         {
-            throw new UnauthorizedAccessException("Atendentes e Administradores Técnicos não possuem permissão de acesso ao histórico clínico.");
+            throw new AcessoNegadoException("Atendentes e Administradores Técnicos não possuem permissão de acesso ao histórico clínico.");
         }
 
-        var paciente = await _context.Pacientes
-            .Include(p => p.Consultas).ThenInclude(c => c.Evolucao)
+        var paciente = await context.Pacientes
+            .Include(p => p.Consultas).ThenInclude(c => c.Evolucao).ThenInclude(e => e!.Medico).ThenInclude(m => m.Usuario)
             .Include(p => p.Consultas).ThenInclude(c => c.Coleta)
             .Include(p => p.Consultas).ThenInclude(c => c.Slot).ThenInclude(s => s.Medico).ThenInclude(m => m.Usuario)
             .Include(p => p.Consultas).ThenInclude(c => c.Slot).ThenInclude(s => s.Instituicao)
@@ -177,287 +122,158 @@ public class ProntuarioService : IProntuarioService
             .Include(p => p.Autorizacoes).ThenInclude(a => a.InstituicaoOrigem)
             .Include(p => p.Autorizacoes).ThenInclude(a => a.InstituicaoDestino)
             .FirstOrDefaultAsync(p => p.Id == pacienteId)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
-        // 2. Se for Paciente, só pode ver seu próprio histórico
-        if (perfil == PerfilUsuario.Paciente)
+        // Consultas e documentos são filtrados pela instituição de origem que o solicitante pode ver.
+        Func<Guid, bool> podeVerOrigem;
+        switch (solicitante.Perfil)
         {
-            if (paciente.UsuarioId != solicitanteUsuarioId)
-            {
-                throw new UnauthorizedAccessException("Você não tem permissão para acessar o histórico de outro paciente.");
-            }
-        }
-        else if (perfil == PerfilUsuario.Medico)
-        {
-            // 3. Se for Médico: precisa ter consulta com o paciente
-            var medico = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == solicitanteUsuarioId)
-                ?? throw new UnauthorizedAccessException("Médico não encontrado.");
-
-            var temConsultaVinculada = await _context.Consultas
-                .AnyAsync(c => c.PacienteId == pacienteId && c.Slot.MedicoId == medico.Id);
-
-            if (!temConsultaVinculada)
-            {
-                throw new UnauthorizedAccessException("Médico só pode acessar o histórico de pacientes com consulta vinculada sob sua responsabilidade.");
-            }
-        }
-
-        // Filtragem de dados com base no consentimento de compartilhamento entre instituições
-        var consultasAutorizadas = new List<Consulta>();
-        var documentosAutorizados = new List<DocumentoPaciente>();
-
-        if (perfil == PerfilUsuario.Paciente)
-        {
-            consultasAutorizadas = paciente.Consultas.ToList();
-            documentosAutorizados = paciente.Documentos.ToList();
-        }
-        else if (perfil == PerfilUsuario.Medico)
-        {
-            var medico = await _context.Medicos.FirstAsync(m => m.UsuarioId == solicitanteUsuarioId);
-            var instMedico = medico.InstituicaoId;
-
-            // Consultas da própria instituição do médico OU de outra instituição se houver autorização ativa
-            foreach (var cons in paciente.Consultas)
-            {
-                if (cons.Slot.InstituicaoId == instMedico)
+            case PerfilUsuario.Paciente:
+                if (paciente.UsuarioId != solicitante.Id)
                 {
-                    consultasAutorizadas.Add(cons);
+                    throw new AcessoNegadoException("Você não tem permissão para acessar o histórico de outro paciente.");
                 }
-                else
-                {
-                    var temAutorizacao = paciente.Autorizacoes.Any(a => 
-                        a.InstituicaoOrigemId == cons.Slot.InstituicaoId && 
-                        a.InstituicaoDestinoId == instMedico && 
-                        a.RevogadaEmUtc == null);
+                podeVerOrigem = _ => true;
+                break;
 
-                    if (temAutorizacao)
-                    {
-                        consultasAutorizadas.Add(cons);
-                    }
-                }
-            }
-
-            foreach (var doc in paciente.Documentos)
-            {
-                if (doc.InstituicaoOrigemId == instMedico)
+            case PerfilUsuario.Medico:
+                var medico = await MedicoDeAsync(solicitante);
+                var temConsultaVinculada = await context.Consultas
+                    .AnyAsync(c => c.PacienteId == pacienteId && c.Slot.MedicoId == medico.Id);
+                if (!temConsultaVinculada)
                 {
-                    documentosAutorizados.Add(doc);
+                    throw new AcessoNegadoException("Médico só pode acessar o histórico de pacientes com consulta vinculada sob sua responsabilidade.");
                 }
-                else
-                {
-                    var temAutorizacao = paciente.Autorizacoes.Any(a => 
-                        a.InstituicaoOrigemId == doc.InstituicaoOrigemId && 
-                        a.InstituicaoDestinoId == instMedico && 
-                        a.RevogadaEmUtc == null);
+                podeVerOrigem = origem => paciente.InstituicaoPodeVer(medico.InstituicaoId, origem);
+                break;
 
-                    if (temAutorizacao)
-                    {
-                        documentosAutorizados.Add(doc);
-                    }
-                }
-            }
+            default:
+                // Enfermeiro passa pelo controle de acesso, mas não vê consultas nem documentos.
+                podeVerOrigem = _ => false;
+                break;
         }
 
-        var consultasDto = consultasAutorizadas.Select(MapearConsultaDto).ToList();
-
-        var evolucoesDto = consultasAutorizadas
-            .Where(c => c.Evolucao != null)
-            .Select(c => new EvolucaoDto(
-                c.Evolucao!.Id,
-                c.Id,
-                c.Evolucao.MedicoId,
-                c.Slot.Medico.Usuario.NomeCompleto,
-                c.Evolucao.Texto,
-                c.Evolucao.CriadaEmUtc
-            )).ToList();
-
-        var docsDto = documentosAutorizados.Select(d => new DocumentoPacienteDto(
-            d.Id,
-            d.PacienteId,
-            d.InstituicaoOrigemId,
-            d.InstituicaoOrigem.Nome,
-            d.NomeOriginal,
-            d.Tipo,
-            d.Extensao,
-            d.TamanhoBytes,
-            d.CriadoEmUtc
-        )).ToList();
-
-        var autsDto = paciente.Autorizacoes
-            .Where(a => a.RevogadaEmUtc == null)
-            .Select(a => new AutorizacaoDto(
-                a.Id,
-                a.PacienteId,
-                paciente.Nome,
-                a.InstituicaoOrigemId,
-                a.InstituicaoOrigem.Nome,
-                a.InstituicaoDestinoId,
-                a.InstituicaoDestino.Nome,
-                a.CriadaEmUtc,
-                a.RevogadaEmUtc,
-                a.RevogadaEmUtc == null
-            )).ToList();
+        var consultas = paciente.Consultas.Where(c => podeVerOrigem(c.Slot.InstituicaoId)).ToList();
+        var documentos = paciente.Documentos.Where(d => podeVerOrigem(d.InstituicaoOrigemId)).ToList();
 
         return new HistoricoPacienteDto(
             paciente.Id,
             paciente.Nome,
             paciente.DataNascimento,
-            consultasDto,
-            evolucoesDto,
-            docsDto,
-            autsDto
+            consultas.Select(c => c.ToDto()).ToList(),
+            consultas.Where(c => c.Evolucao != null).Select(c => c.Evolucao!.ToDto()).ToList(),
+            documentos.Select(d => d.ToDto()).ToList(),
+            paciente.Autorizacoes.Where(a => a.RevogadaEmUtc == null).Select(a => a.ToDto()).ToList()
         );
     }
 
-    public async Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<DocumentoPacienteDto> AnexarDocumentoAsync(Guid pacienteId, Guid instituicaoOrigemId, IFormFile arquivo, UsuarioAtual solicitante)
     {
-        if (perfil != PerfilUsuario.Paciente && perfil != PerfilUsuario.Medico)
+        if (solicitante.Perfil is not (PerfilUsuario.Paciente or PerfilUsuario.Medico))
         {
-            throw new UnauthorizedAccessException("Apenas o próprio paciente ou seu médico podem anexar documentos.");
+            throw new AcessoNegadoException("Apenas o próprio paciente ou seu médico podem anexar documentos.");
         }
 
-        var paciente = await _context.Pacientes.FindAsync(pacienteId)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
-        if (perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitanteUsuarioId)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
-        // Validação de tamanho (máximo 5MB)
-        if (arquivo.Length > 5 * 1024 * 1024)
+        if (arquivo.Length > TamanhoMaximoBytes)
         {
-            throw new InvalidOperationException("O arquivo excede o limite máximo permitido de 5 MB.");
+            throw new RegraDeNegocioException("O arquivo excede o limite máximo permitido de 5 MB.");
         }
 
-        var extensoesValidas = new[] { ".pdf", ".jpg", ".jpeg", ".png" };
-        var ext = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
-
-        if (!extensoesValidas.Contains(ext))
+        var extensao = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
+        if (!ExtensoesPermitidas.Contains(extensao))
         {
-            throw new InvalidOperationException("Formato de arquivo não suportado. Utilize PDF, JPG ou PNG.");
+            throw new RegraDeNegocioException("Formato de arquivo não suportado. Utilize PDF, JPG ou PNG.");
         }
 
-        var chaveUnica = $"{Guid.NewGuid()}{ext}";
-        var caminhoCompleto = Path.Combine(_uploadDir, chaveUnica);
+        var chaveArquivo = await arquivos.SalvarAsync(arquivo, extensao);
 
-        using (var stream = new FileStream(caminhoCompleto, FileMode.Create))
+        var documento = new DocumentoPaciente
         {
-            await arquivo.CopyToAsync(stream);
-        }
-
-        var doc = new DocumentoPaciente
-        {
-            Id = Guid.NewGuid(),
             PacienteId = pacienteId,
             InstituicaoOrigemId = instituicaoOrigemId,
             NomeOriginal = Path.GetFileName(arquivo.FileName),
             Tipo = arquivo.ContentType,
-            Extensao = ext,
+            Extensao = extensao,
             TamanhoBytes = arquivo.Length,
-            ChaveArquivo = chaveUnica,
+            ChaveArquivo = chaveArquivo,
             CriadoEmUtc = DateTime.UtcNow
         };
 
-        await _context.DocumentosPaciente.AddAsync(doc);
-        await _context.SaveChangesAsync();
+        context.DocumentosPaciente.Add(documento);
+        await context.SaveChangesAsync();
 
-        var inst = await _context.Instituicoes.FindAsync(instituicaoOrigemId);
-
-        return new DocumentoPacienteDto(
-            doc.Id,
-            doc.PacienteId,
-            doc.InstituicaoOrigemId,
-            inst?.Nome ?? "Instituição",
-            doc.NomeOriginal,
-            doc.Tipo,
-            doc.Extensao,
-            doc.TamanhoBytes,
-            doc.CriadoEmUtc
-        );
+        return await context.DocumentosPaciente.Where(d => d.Id == documento.Id).Select(Mapeamentos.Documento).FirstAsync();
     }
 
-    public async Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<List<DocumentoPacienteDto>> ListarDocumentosAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
-        var hist = await ObterHistoricoPacienteAsync(pacienteId, solicitanteUsuarioId, perfil);
-        return hist.Documentos;
+        var historico = await ObterHistoricoPacienteAsync(pacienteId, solicitante);
+        return historico.Documentos;
     }
 
-    public async Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, Guid solicitanteUsuarioId, PerfilUsuario perfil)
+    public async Task<(byte[] Bytes, string ContentType, string NomeArquivo)?> ObterArquivoParaDownloadAsync(Guid documentoId, UsuarioAtual solicitante)
     {
-        if (perfil == PerfilUsuario.Atendente || perfil == PerfilUsuario.Admin)
+        if (solicitante.Perfil is PerfilUsuario.Atendente or PerfilUsuario.Admin)
         {
-            throw new UnauthorizedAccessException("Atendentes e Administradores não possuem permissão para download de arquivos clínicos.");
+            throw new AcessoNegadoException("Atendentes e Administradores não possuem permissão para download de arquivos clínicos.");
         }
 
-        var doc = await _context.DocumentosPaciente
-            .Include(d => d.Paciente)
+        var documento = await context.DocumentosPaciente
+            .Include(d => d.Paciente).ThenInclude(p => p.Autorizacoes)
             .FirstOrDefaultAsync(d => d.Id == documentoId);
 
-        if (doc == null) return null;
+        if (documento == null) return null;
 
-        // Validar autorização
-        if (perfil == PerfilUsuario.Paciente)
+        if (solicitante.Perfil == PerfilUsuario.Paciente && documento.Paciente.UsuarioId != solicitante.Id)
         {
-            if (doc.Paciente.UsuarioId != solicitanteUsuarioId)
-                throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
-        else if (perfil == PerfilUsuario.Medico)
+
+        if (solicitante.Perfil == PerfilUsuario.Medico)
         {
-            var medico = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == solicitanteUsuarioId)
-                ?? throw new UnauthorizedAccessException("Médico não encontrado.");
+            var medico = await MedicoDeAsync(solicitante);
 
-            var temConsulta = await _context.Consultas.AnyAsync(c => c.PacienteId == doc.PacienteId && c.Slot.MedicoId == medico.Id);
-            if (!temConsulta) throw new UnauthorizedAccessException("Acesso negado.");
+            var temConsulta = await context.Consultas.AnyAsync(c => c.PacienteId == documento.PacienteId && c.Slot.MedicoId == medico.Id);
+            if (!temConsulta) throw new AcessoNegadoException("Acesso negado.");
 
-            if (doc.InstituicaoOrigemId != medico.InstituicaoId)
+            if (!documento.Paciente.InstituicaoPodeVer(medico.InstituicaoId, documento.InstituicaoOrigemId))
             {
-                var temAut = await _context.AutorizacoesCompartilhamento.AnyAsync(a => 
-                    a.PacienteId == doc.PacienteId && 
-                    a.InstituicaoOrigemId == doc.InstituicaoOrigemId && 
-                    a.InstituicaoDestinoId == medico.InstituicaoId && 
-                    a.RevogadaEmUtc == null);
-
-                if (!temAut) throw new UnauthorizedAccessException("Acesso negado: Autorização de compartilhamento ausente ou revogada.");
+                throw new AcessoNegadoException("Acesso negado: Autorização de compartilhamento ausente ou revogada.");
             }
         }
 
-        var caminho = Path.Combine(_uploadDir, doc.ChaveArquivo);
-        byte[] bytes;
+        // Documentos do seed não existem em disco: entrega um conteúdo fictício de demonstração.
+        var bytes = await arquivos.LerAsync(documento.ChaveArquivo)
+            ?? Encoding.UTF8.GetBytes($"[Arquivo Fictício de Demonstração]: {documento.NomeOriginal}\nPaciente ID: {documento.PacienteId}\nOrigem ID: {documento.InstituicaoOrigemId}");
 
-        if (File.Exists(caminho))
-        {
-            bytes = await File.ReadAllBytesAsync(caminho);
-        }
-        else
-        {
-            // Arquivo fictício gerado em memória para demonstração caso não esteja no disco
-            bytes = System.Text.Encoding.UTF8.GetBytes($"[Arquivo Fictício de Demonstração]: {doc.NomeOriginal}\nPaciente ID: {doc.PacienteId}\nOrigem ID: {doc.InstituicaoOrigemId}");
-        }
-
-        return (bytes, doc.Tipo, doc.NomeOriginal);
+        return (bytes, documento.Tipo, documento.NomeOriginal);
     }
 
-    public async Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, Guid pacienteUsuarioId)
+    public async Task<AutorizacaoDto> ConcederAutorizacaoAsync(Guid pacienteId, CriarAutorizacaoDto dto, UsuarioAtual solicitante)
     {
-        var paciente = await _context.Pacientes
-            .Include(p => p.Usuario)
-            .FirstOrDefaultAsync(p => p.Id == pacienteId)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
-        if (paciente.UsuarioId != pacienteUsuarioId)
+        if (paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Apenas o próprio paciente pode conceder autorizações de compartilhamento.");
+            throw new AcessoNegadoException("Apenas o próprio paciente pode conceder autorizações de compartilhamento.");
         }
 
         if (dto.InstituicaoOrigemId == dto.InstituicaoDestinoId)
         {
-            throw new InvalidOperationException("Instituição de origem e destino devem ser diferentes.");
+            throw new RegraDeNegocioException("Instituição de origem e destino devem ser diferentes.");
         }
 
-        var aut = new AutorizacaoCompartilhamento
+        var autorizacao = new AutorizacaoCompartilhamento
         {
-            Id = Guid.NewGuid(),
             PacienteId = pacienteId,
             InstituicaoOrigemId = dto.InstituicaoOrigemId,
             InstituicaoDestinoId = dto.InstituicaoDestinoId,
@@ -465,99 +281,64 @@ public class ProntuarioService : IProntuarioService
             RevogadaEmUtc = null
         };
 
-        await _context.AutorizacoesCompartilhamento.AddAsync(aut);
-        await _context.SaveChangesAsync();
+        context.AutorizacoesCompartilhamento.Add(autorizacao);
+        await context.SaveChangesAsync();
 
-        var instOrigem = await _context.Instituicoes.FindAsync(dto.InstituicaoOrigemId);
-        var instDestino = await _context.Instituicoes.FindAsync(dto.InstituicaoDestinoId);
-
-        return new AutorizacaoDto(
-            aut.Id,
-            pacienteId,
-            paciente.Nome,
-            dto.InstituicaoOrigemId,
-            instOrigem?.Nome ?? "Origem",
-            dto.InstituicaoDestinoId,
-            instDestino?.Nome ?? "Destino",
-            aut.CriadaEmUtc,
-            null,
-            true
-        );
+        return await context.AutorizacoesCompartilhamento.Where(a => a.Id == autorizacao.Id).Select(Mapeamentos.Autorizacao).FirstAsync();
     }
 
-    public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, Guid pacienteUsuarioId)
+    public async Task<bool> RevogarAutorizacaoAsync(Guid autorizacaoId, UsuarioAtual solicitante)
     {
-        var aut = await _context.AutorizacoesCompartilhamento
+        var autorizacao = await context.AutorizacoesCompartilhamento
             .Include(a => a.Paciente)
             .FirstOrDefaultAsync(a => a.Id == autorizacaoId);
 
-        if (aut == null) return false;
+        if (autorizacao == null) return false;
 
-        if (aut.Paciente.UsuarioId != pacienteUsuarioId)
+        if (autorizacao.Paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Você só pode revogar autorizações do seu próprio cadastro.");
+            throw new AcessoNegadoException("Você só pode revogar autorizações do seu próprio cadastro.");
         }
 
-        if (aut.RevogadaEmUtc == null)
+        if (autorizacao.RevogadaEmUtc == null)
         {
-            aut.RevogadaEmUtc = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            autorizacao.RevogadaEmUtc = DateTime.UtcNow;
+            await context.SaveChangesAsync();
         }
 
         return true;
     }
 
-    public async Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, Guid pacienteUsuarioId)
+    public async Task<List<AutorizacaoDto>> ListarAutorizacoesAsync(Guid pacienteId, UsuarioAtual solicitante)
     {
-        var paciente = await _context.Pacientes.FindAsync(pacienteId)
-            ?? throw new InvalidOperationException("Paciente não encontrado.");
+        var paciente = await context.Pacientes.FindAsync(pacienteId)
+            ?? throw new RegraDeNegocioException("Paciente não encontrado.");
 
-        if (paciente.UsuarioId != pacienteUsuarioId)
+        if (paciente.UsuarioId != solicitante.Id)
         {
-            throw new UnauthorizedAccessException("Acesso negado.");
+            throw new AcessoNegadoException("Acesso negado.");
         }
 
-        var auts = await _context.AutorizacoesCompartilhamento
-            .Include(a => a.InstituicaoOrigem)
-            .Include(a => a.InstituicaoDestino)
+        return await context.AutorizacoesCompartilhamento
             .Where(a => a.PacienteId == pacienteId)
             .OrderByDescending(a => a.CriadaEmUtc)
+            .Select(Mapeamentos.Autorizacao)
             .ToListAsync();
-
-        return auts.Select(a => new AutorizacaoDto(
-            a.Id,
-            a.PacienteId,
-            paciente.Nome,
-            a.InstituicaoOrigemId,
-            a.InstituicaoOrigem.Nome,
-            a.InstituicaoDestinoId,
-            a.InstituicaoDestino.Nome,
-            a.CriadaEmUtc,
-            a.RevogadaEmUtc,
-            a.RevogadaEmUtc == null
-        )).ToList();
     }
 
-    private static ConsultaDto MapearConsultaDto(Consulta c)
+    private static NotificacaoSimulada ConvitePesquisa(Consulta consulta, CanalNotificacao canal, string titulo, string texto) => new()
     {
-        return new ConsultaDto(
-            c.Id,
-            c.PacienteId,
-            c.Paciente?.Nome ?? "Paciente",
-            c.Slot?.MedicoId ?? Guid.Empty,
-            c.Slot?.Medico?.Usuario?.NomeCompleto ?? "Médico",
-            c.Slot?.Medico?.Especialidade ?? "Especialidade",
-            c.Slot?.InstituicaoId ?? Guid.Empty,
-            c.Slot?.Instituicao?.Nome ?? "Instituição",
-            c.SlotId,
-            c.Slot?.InicioUtc ?? DateTime.MinValue,
-            c.Slot?.FimUtc ?? DateTime.MinValue,
-            c.ColetaId,
-            c.Coleta?.ResumoValidado,
-            c.Status,
-            c.CriadaEmUtc,
-            c.Evolucao != null,
-            c.PesquisaSatisfacao != null
-        );
-    }
+        PacienteId = consulta.PacienteId,
+        ConsultaId = consulta.Id,
+        Canal = canal,
+        Finalidade = FinalidadeNotificacao.ConvitePesquisa,
+        Titulo = titulo,
+        Texto = texto,
+        CriadaEmUtc = DateTime.UtcNow
+    };
+
+    /// <summary>Registro de Medico do solicitante, para regras que dependem da instituição dele.</summary>
+    private async Task<Medico> MedicoDeAsync(UsuarioAtual solicitante)
+        => await context.Medicos.FindAsync(solicitante.MedicoId)
+           ?? throw new AcessoNegadoException("Médico não encontrado.");
 }

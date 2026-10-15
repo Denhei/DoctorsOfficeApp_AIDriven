@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ApiService } from '../../../services/api.service';
+import { ApiService, HealthStatus } from '../../../services/api.service';
 
 @Component({
   selector: 'app-admin-saude',
@@ -50,7 +50,7 @@ import { ApiService } from '../../../services/api.service';
 export class AdminSaudeComponent implements OnInit {
   private api = inject(ApiService);
 
-  saude: any = null;
+  saude: HealthStatus | null = null;
   loading = false;
 
   ngOnInit() {

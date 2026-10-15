@@ -12,94 +12,22 @@ public interface IAuthService
     Task<UsuarioInfoDto?> ObterUsuarioAtualAsync(Guid usuarioId);
 }
 
-public class AuthService : IAuthService
+public class AuthService(UserManager<Usuario> userManager, AppDbContext context, IJwtTokenGenerator jwtTokenGenerator) : IAuthService
 {
-    private readonly UserManager<Usuario> _userManager;
-    private readonly AppDbContext _context;
-    private readonly IJwtTokenGenerator _jwtTokenGenerator;
-
-    public AuthService(UserManager<Usuario> userManager, AppDbContext context, IJwtTokenGenerator jwtTokenGenerator)
-    {
-        _userManager = userManager;
-        _context = context;
-        _jwtTokenGenerator = jwtTokenGenerator;
-    }
-
     public async Task<AuthResponseDto?> LoginAsync(LoginDto dto)
     {
-        var usuario = await _userManager.Users
-            .Include(u => u.Instituicao)
+        var usuario = await userManager.Users
             .FirstOrDefaultAsync(u => u.Email == dto.Email || u.UserName == dto.Email);
 
-        if (usuario == null)
+        if (usuario == null || !await userManager.CheckPasswordAsync(usuario, dto.Senha))
             return null;
 
-        var senhaValida = await _userManager.CheckPasswordAsync(usuario, dto.Senha);
-        if (!senhaValida)
-            return null;
+        var info = (await ObterUsuarioAtualAsync(usuario.Id))!;
+        var (token, expiraEm) = jwtTokenGenerator.GerarToken(usuario, info.PacienteId, info.MedicoId);
 
-        Guid? pacienteId = null;
-        Guid? medicoId = null;
-
-        if (usuario.Perfil == Models.Enums.PerfilUsuario.Paciente)
-        {
-            var pac = await _context.Pacientes.FirstOrDefaultAsync(p => p.UsuarioId == usuario.Id);
-            pacienteId = pac?.Id;
-        }
-        else if (usuario.Perfil == Models.Enums.PerfilUsuario.Medico)
-        {
-            var med = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == usuario.Id);
-            medicoId = med?.Id;
-        }
-
-        var (token, expiraEm) = _jwtTokenGenerator.GerarToken(usuario, pacienteId, medicoId);
-
-        var userInfo = new UsuarioInfoDto(
-            usuario.Id,
-            usuario.NomeCompleto,
-            usuario.Email ?? string.Empty,
-            usuario.Perfil,
-            usuario.InstituicaoId,
-            usuario.Instituicao?.Nome,
-            pacienteId,
-            medicoId
-        );
-
-        return new AuthResponseDto(token, expiraEm, userInfo);
+        return new AuthResponseDto(token, expiraEm, info);
     }
 
-    public async Task<UsuarioInfoDto?> ObterUsuarioAtualAsync(Guid usuarioId)
-    {
-        var usuario = await _userManager.Users
-            .Include(u => u.Instituicao)
-            .FirstOrDefaultAsync(u => u.Id == usuarioId);
-
-        if (usuario == null)
-            return null;
-
-        Guid? pacienteId = null;
-        Guid? medicoId = null;
-
-        if (usuario.Perfil == Models.Enums.PerfilUsuario.Paciente)
-        {
-            var pac = await _context.Pacientes.FirstOrDefaultAsync(p => p.UsuarioId == usuario.Id);
-            pacienteId = pac?.Id;
-        }
-        else if (usuario.Perfil == Models.Enums.PerfilUsuario.Medico)
-        {
-            var med = await _context.Medicos.FirstOrDefaultAsync(m => m.UsuarioId == usuario.Id);
-            medicoId = med?.Id;
-        }
-
-        return new UsuarioInfoDto(
-            usuario.Id,
-            usuario.NomeCompleto,
-            usuario.Email ?? string.Empty,
-            usuario.Perfil,
-            usuario.InstituicaoId,
-            usuario.Instituicao?.Nome,
-            pacienteId,
-            medicoId
-        );
-    }
+    public Task<UsuarioInfoDto?> ObterUsuarioAtualAsync(Guid usuarioId)
+        => userManager.Users.Where(u => u.Id == usuarioId).Select(Mapeamentos.UsuarioInfo(context)).FirstOrDefaultAsync();
 }

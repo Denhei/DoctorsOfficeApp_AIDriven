@@ -3,6 +3,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Consultorio.Api.Models.Mongo;
 
+[BsonIgnoreExtraElements]
 public class ConversaMongo
 {
     [BsonId]
@@ -19,10 +20,6 @@ public class ConversaMongo
     public string InstituicaoId { get; set; } = string.Empty;
 
     public int EtapaAtual { get; set; } = 1;
-
-    public int VersaoRoteiro { get; set; } = 1;
-
-    public string Status { get; set; } = "EmAndamento"; // EmAndamento, Concluida, Cancelada
 
     public ResumoPreliminarMongo ResumoPreliminar { get; set; } = new();
 
@@ -55,11 +52,27 @@ public class MensagemMongo
 
     public string Conteudo { get; set; } = string.Empty;
 
-    public string Tipo { get; set; } = "Texto"; // "Texto", "Opcoes", "Resumo"
+    public string Tipo { get; set; } = "Texto"; // "Texto" ou "Opcoes"
 
     public List<string>? Opcoes { get; set; }
 
     public string? ClienteMessageId { get; set; }
 
     public DateTime EnviadaEmUtc { get; set; } = DateTime.UtcNow;
+
+    public static MensagemMongo Bot(string conteudo, params string[] opcoes) => new()
+    {
+        Remetente = "Bot",
+        Conteudo = conteudo,
+        Tipo = opcoes.Length > 0 ? "Opcoes" : "Texto",
+        Opcoes = opcoes.Length > 0 ? [.. opcoes] : null,
+    };
+
+    public static MensagemMongo DoPaciente(string conteudo, string? clienteMessageId = null) => new()
+    {
+        Remetente = "Paciente",
+        Conteudo = conteudo,
+        Tipo = "Texto",
+        ClienteMessageId = clienteMessageId,
+    };
 }

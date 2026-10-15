@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Consultorio.Api.DTOs;
 using Consultorio.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -8,15 +7,8 @@ namespace Consultorio.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public class AuthController(IAuthService authService) : ConsultorioControllerBase
 {
-    private readonly IAuthService _authService;
-
-    public AuthController(IAuthService authService)
-    {
-        _authService = authService;
-    }
-
     /// <summary>
     /// Realiza login no sistema com contas fictícias pré-carregadas.
     /// </summary>
@@ -26,7 +18,7 @@ public class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
-        var response = await _authService.LoginAsync(dto);
+        var response = await authService.LoginAsync(dto);
         if (response == null)
         {
             return Unauthorized(new { mensagem = "Credenciais inválidas ou usuário não encontrado." });
@@ -44,13 +36,7 @@ public class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Me()
     {
-        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
-            return Unauthorized();
-        }
-
-        var userInfo = await _authService.ObterUsuarioAtualAsync(userId);
+        var userInfo = await authService.ObterUsuarioAtualAsync(Solicitante.Id);
         if (userInfo == null)
         {
             return NotFound(new { mensagem = "Usuário não encontrado." });

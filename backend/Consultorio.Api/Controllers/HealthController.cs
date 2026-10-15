@@ -7,17 +7,8 @@ namespace Consultorio.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class HealthController : ControllerBase
+public class HealthController(AppDbContext context, MongoDbContext mongoContext) : ControllerBase
 {
-    private readonly AppDbContext _context;
-    private readonly MongoDbContext _mongoContext;
-
-    public HealthController(AppDbContext context, MongoDbContext mongoContext)
-    {
-        _context = context;
-        _mongoContext = mongoContext;
-    }
-
     /// <summary>
     /// Verifica a saúde dos serviços e conexões com os bancos PostgreSQL e MongoDB.
     /// </summary>
@@ -29,7 +20,7 @@ public class HealthController : ControllerBase
 
         try
         {
-            postgresOk = await _context.Database.CanConnectAsync();
+            postgresOk = await context.Database.CanConnectAsync();
         }
         catch
         {
@@ -38,7 +29,7 @@ public class HealthController : ControllerBase
 
         try
         {
-            var count = await _mongoContext.Conversas.CountDocumentsAsync(new BsonDocument());
+            await mongoContext.Conversas.CountDocumentsAsync(new BsonDocument());
             mongoOk = true;
         }
         catch

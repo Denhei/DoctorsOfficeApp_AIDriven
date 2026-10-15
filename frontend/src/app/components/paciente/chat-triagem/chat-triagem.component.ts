@@ -2,7 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { ApiService, Instituicao, ConversaDetalhe } from '../../../services/api.service';
+import { ApiService, Instituicao, ConversaDetalhe, MensagemChat } from '../../../services/api.service';
 import { AuthService } from '../../../services/auth.service';
 
 @Component({
@@ -345,7 +345,7 @@ export class ChatTriagemComponent implements OnInit {
     });
   }
 
-  isUltimaMensagem(msg: any): boolean {
+  isUltimaMensagem(msg: MensagemChat): boolean {
     if (!this.conversa || !this.conversa.mensagens.length) return false;
     return this.conversa.mensagens[this.conversa.mensagens.length - 1].id === msg.id;
   }

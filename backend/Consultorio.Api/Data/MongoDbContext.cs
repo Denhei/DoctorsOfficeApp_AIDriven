@@ -9,16 +9,12 @@ public class MongoDbContext
 
     public MongoDbContext(IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("MongoConnection") 
-            ?? configuration["MONGO_CONNECTION_STRING"] 
-            ?? "mongodb://localhost:27017";
+        var connectionString = configuration.GetConnectionString("MongoConnection")
+            ?? throw new InvalidOperationException("ConnectionStrings:MongoConnection não configurada.");
+        var databaseName = configuration["MongoDatabaseName"]
+            ?? throw new InvalidOperationException("MongoDatabaseName não configurado.");
 
-        var databaseName = configuration["MongoDatabaseName"] 
-            ?? configuration["MONGO_DATABASE_NAME"] 
-            ?? "consultorio_mongo_db";
-
-        var client = new MongoClient(connectionString);
-        _database = client.GetDatabase(databaseName);
+        _database = new MongoClient(connectionString).GetDatabase(databaseName);
     }
 
     public IMongoCollection<ConversaMongo> Conversas => _database.GetCollection<ConversaMongo>("conversas");

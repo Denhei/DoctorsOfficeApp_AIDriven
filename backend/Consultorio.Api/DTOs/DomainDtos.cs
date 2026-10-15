@@ -2,6 +2,9 @@ using Consultorio.Api.Models.Enums;
 
 namespace Consultorio.Api.DTOs;
 
+// DTOs de entrada usam init e valor padrão explícito para que um campo ausente no JSON
+// chegue como "" e não como null.
+
 // --- Instituição & Médico ---
 public record InstituicaoDto(Guid Id, string Nome, string RazaoSocial, bool Ativa);
 
@@ -10,32 +13,31 @@ public record MedicoDto(Guid Id, Guid UsuarioId, string Nome, string Especialida
 // --- Paciente ---
 public record PacienteDto(Guid Id, Guid UsuarioId, string Nome, DateTime DataNascimento, string TelefoneFicticio, string EmailFicticio, DateTime CriadoEmUtc);
 
-public class CriarPacienteDto
+public record CriarPacienteDto
 {
-    public string Nome { get; set; } = string.Empty;
-    public DateTime DataNascimento { get; set; }
-    public string TelefoneFicticio { get; set; } = string.Empty;
-    public string EmailFicticio { get; set; } = string.Empty;
-    public string Senha { get; set; } = string.Empty;
+    public string Nome { get; init; } = string.Empty;
+    public DateTime DataNascimento { get; init; }
+    public string TelefoneFicticio { get; init; } = string.Empty;
+    public string EmailFicticio { get; init; } = string.Empty;
+    public string Senha { get; init; } = string.Empty;
 }
 
-public class AtualizarPacienteDto
+public record AtualizarPacienteDto
 {
-    public string? TelefoneFicticio { get; set; }
-    public string? EmailFicticio { get; set; }
+    public string? TelefoneFicticio { get; init; }
+    public string? EmailFicticio { get; init; }
 }
 
 // --- Coleta & Chat ---
-public class IniciarColetaDto
+public record IniciarColetaDto
 {
-    public Guid InstituicaoId { get; set; }
+    public Guid InstituicaoId { get; init; }
 }
 
-public class EnviarMensagemChatDto
+public record EnviarMensagemChatDto
 {
-    public string Conteudo { get; set; } = string.Empty;
-    public string? ClienteMessageId { get; set; }
-    public int? EtapaEsperada { get; set; }
+    public string Conteudo { get; init; } = string.Empty;
+    public string? ClienteMessageId { get; init; }
 }
 
 public record ResumoPreliminarDto(
@@ -70,11 +72,12 @@ public record ConversaDetalheDto(
     DateTime CriadaEmUtc
 );
 
-public class ValidarColetaDto
+public record ValidarColetaDto
 {
-    public bool AprovadoParaAgendamento { get; set; } // true -> Validada, false -> EncaminhadaPresencial
-    public string ResumoCorrigido { get; set; } = string.Empty;
-    public string? ObservacaoEnfermeiro { get; set; }
+    /// <summary>true leva a Validada (libera agendamento); false leva a EncaminhadaPresencial.</summary>
+    public bool AprovadoParaAgendamento { get; init; }
+    public string ResumoCorrigido { get; init; } = string.Empty;
+    public string? ObservacaoEnfermeiro { get; init; }
 }
 
 public record ColetaItemFilaDto(
@@ -101,19 +104,19 @@ public record SlotAgendaDto(
     bool Disponivel
 );
 
-public class CriarSlotDto
+public record CriarSlotDto
 {
-    public Guid MedicoId { get; set; }
-    public Guid InstituicaoId { get; set; }
-    public DateTime InicioUtc { get; set; }
-    public DateTime FimUtc { get; set; }
+    public Guid MedicoId { get; init; }
+    public Guid InstituicaoId { get; init; }
+    public DateTime InicioUtc { get; init; }
+    public DateTime FimUtc { get; init; }
 }
 
-public class AgendarConsultaDto
+public record AgendarConsultaDto
 {
-    public Guid PacienteId { get; set; }
-    public Guid SlotId { get; set; }
-    public Guid ColetaId { get; set; }
+    public Guid PacienteId { get; init; }
+    public Guid SlotId { get; init; }
+    public Guid ColetaId { get; init; }
 }
 
 public record ConsultaDto(
@@ -136,15 +139,15 @@ public record ConsultaDto(
     bool TemPesquisaRespondida
 );
 
-public class AtualizarStatusConsultaDto
+public record AtualizarStatusConsultaDto
 {
-    public StatusConsulta NovoStatus { get; set; }
+    public StatusConsulta NovoStatus { get; init; }
 }
 
 // --- Evolução & Prontuário ---
-public class RegistrarEvolucaoDto
+public record RegistrarEvolucaoDto
 {
-    public string Texto { get; set; } = string.Empty;
+    public string Texto { get; init; } = string.Empty;
 }
 
 public record EvolucaoDto(
@@ -179,10 +182,10 @@ public record HistoricoPacienteDto(
 );
 
 // --- Compartilhamento ---
-public class CriarAutorizacaoDto
+public record CriarAutorizacaoDto
 {
-    public Guid InstituicaoOrigemId { get; set; }
-    public Guid InstituicaoDestinoId { get; set; }
+    public Guid InstituicaoOrigemId { get; init; }
+    public Guid InstituicaoDestinoId { get; init; }
 }
 
 public record AutorizacaoDto(
@@ -221,11 +224,11 @@ public record PesquisaSatisfacaoDto(
     DateTime RespondidaEmUtc
 );
 
-public class ResponderPesquisaDto
+public record ResponderPesquisaDto
 {
-    public int Nota { get; set; }
-    public PercepcaoAtendimento Percepcao { get; set; }
-    public string? Comentario { get; set; }
+    public int Nota { get; init; }
+    public PercepcaoAtendimento Percepcao { get; init; }
+    public string? Comentario { get; init; }
 }
 
 // --- Dashboard ---
@@ -240,13 +243,13 @@ public record DashboardOperacionalDto(
 );
 
 // --- Admin ---
-public class CriarUsuarioAdminDto
+public record CriarUsuarioAdminDto
 {
-    public string NomeCompleto { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string Senha { get; set; } = string.Empty;
-    public PerfilUsuario Perfil { get; set; }
-    public Guid? InstituicaoId { get; set; }
-    public string? EspecialidadeMedico { get; set; }
-    public string? CrmMedico { get; set; }
+    public string NomeCompleto { get; init; } = string.Empty;
+    public string Email { get; init; } = string.Empty;
+    public string Senha { get; init; } = string.Empty;
+    public PerfilUsuario Perfil { get; init; }
+    public Guid? InstituicaoId { get; init; }
+    public string? EspecialidadeMedico { get; init; }
+    public string? CrmMedico { get; init; }
 }

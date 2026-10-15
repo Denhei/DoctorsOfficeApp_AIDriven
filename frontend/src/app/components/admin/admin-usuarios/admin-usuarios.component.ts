@@ -1,7 +1,8 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, Instituicao } from '../../../services/api.service';
+import { ApiService } from '../../../services/api.service';
+import { UsuarioInfo } from '../../../services/auth.service';
 
 @Component({
   selector: 'app-admin-usuarios',
@@ -52,7 +53,7 @@ import { ApiService, Instituicao } from '../../../services/api.service';
 export class AdminUsuariosComponent implements OnInit {
   private api = inject(ApiService);
 
-  usuarios: any[] = [];
+  usuarios: UsuarioInfo[] = [];
   loading = false;
 
   ngOnInit() {

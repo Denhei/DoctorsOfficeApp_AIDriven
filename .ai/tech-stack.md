@@ -1,29 +1,28 @@
 # Tech Stack
 
 ## Backend (C#)
-- **Framework**: ASP.NET Core 7.0 (Web API)
-- **Language**: C# 12
-- **ORM**: Entity Framework Core 7.x
-- **Database Drivers**: Npgsql (PostgreSQL), MongoDB.Driver (MongoDB)
-- **Authentication**: Microsoft.AspNetCore.Authentication.JwtBearer (JWT HS256)
-- **Dependency Injection**: Built‑in ASP.NET Core DI container
-- **Mapping**: AutoMapper 12.x (optional)
-- **Testing**: xUnit 2.5+, Microsoft.AspNetCore.Mvc.Testing
+- **Framework**: ASP.NET Core 8.0 (Web API, `net8.0`)
+- **Language**: C# 12 (construtores primários, collection expressions, records)
+- **ORM**: Entity Framework Core 8 (Npgsql.EntityFrameworkCore.PostgreSQL 8)
+- **Database Drivers**: Npgsql (PostgreSQL), MongoDB.Driver 3.x (MongoDB)
+- **Authentication**: ASP.NET Identity + Microsoft.AspNetCore.Authentication.JwtBearer (JWT HS256)
+- **Configuração**: `IOptions<T>` tipadas (`JwtOptions`, `StorageOptions`), validadas na subida
+- **Erros HTTP**: as exceções de domínio (`RegraDeNegocioException`, `ConflitoException`, `AcessoNegadoException`) viram `{ mensagem }` num único `IExceptionFilter` (`TratadorGlobalDeExcecoes`); falhas de infraestrutura continuam 500
+- **Dependency Injection**: container nativo do ASP.NET Core
+- **Mapping**: projeções `Expression<Func<Entidade, Dto>>` em `DTOs/Mapeamentos.cs`, usadas com `Select` (sem AutoMapper)
+- **Testing**: xUnit 2.9, Microsoft.AspNetCore.Mvc.Testing, Testcontainers (PostgreSQL 16 e MongoDB 7 reais)
 
 ## Frontend (TypeScript)
-- **Framework**: Angular 16.x
-- **Language**: TypeScript 5.x
-- **UI Library**: Angular Material 16.x (optional) / SCSS for styling
-- **HTTP Client**: Angular HttpClient
-- **State Management**: RxJS (Observables)
-- **Testing**: Jest/Karma + Jasmine (Angular CLI default)
+- **Framework**: Angular 19 (componentes standalone, `inject()`, signals no `AuthService`)
+- **Language**: TypeScript 5.6
+- **UI**: CSS próprio em `styles.css` (sem Angular Material)
+- **HTTP Client**: Angular HttpClient; endereço da API em `services/api-url.ts`
+- **Testing**: Karma + Jasmine (padrão do Angular CLI, sem specs escritos)
 
 ## Databases
-- **Relational**: PostgreSQL 15.x (or compatible)
-- **NoSQL**: MongoDB 6.x (for chat collections)
+- **Relational**: PostgreSQL 16 (`docker-compose.yml`)
+- **NoSQL**: MongoDB 7 (coleção `conversas`)
 
 ## DevOps / Containerization
-- **Container Runtime**: Docker Engine 24.x
-- **Orchestration (optional)**: Docker‑Compose (version 2)
-- **CI/CD**: GitHub Actions (or Azure Pipelines)
-
+- **Container Runtime**: Docker (necessário também para rodar os testes de integração)
+- **Orchestration**: docker-compose (bancos locais)
